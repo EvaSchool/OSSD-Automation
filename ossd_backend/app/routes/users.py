@@ -49,6 +49,6 @@ def login():
         print("❌ Incorrect username or password")
         return jsonify({'error': 'Incorrect username or password'}), 401
 
-    token = create_access_token(identity=user.user_id)
+    token = create_access_token(identity=str(user.user_id))
     print("✅ Login successful")
     return jsonify({'access_token': token}), 200

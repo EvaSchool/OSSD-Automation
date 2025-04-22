@@ -12,8 +12,9 @@ bp = Blueprint('courses', __name__)
 def get_courses():
     """Get course list (with pagination, filtering, and sorting)"""
     try:
-        # Get query parameters
+        # 获取查询参数
         keyword = request.args.get('keyword', '')
+        course_code = request.args.get('course_code')
         course_levels = request.args.getlist('course_level')
         is_compulsory = request.args.get('is_compulsory', type=lambda x: x.lower() == 'true')
         sort_field = request.args.get('sort_field', 'course_code')
@@ -21,11 +22,25 @@ def get_courses():
         page = request.args.get('page', 1, type=int)
         page_size = request.args.get('page_size', 10, type=int)
 
-        # Build query
+        # 打印调试信息
+        print("🔍 Query parameters:")
+        print("course_code =", course_code)
+        print("keyword =", keyword)
+        print("course_levels =", course_levels)
+        print("is_compulsory =", is_compulsory)
+        print("sort_field =", sort_field)
+        print("sort_order =", sort_order)
+        print("page =", page)
+        print("page_size =", page_size)
+
+        # 构建查询
         query = Course.query
 
-        # Keyword search
-        if keyword:
+        # 精确匹配 course_code（优先）
+        if course_code:
+            query = query.filter(Course.course_code == course_code)
+        # 如果没传 course_code，则尝试关键词模糊搜索
+        elif keyword:
             query = query.filter(
                 or_(
                     Course.course_code.ilike(f'%{keyword}%'),
@@ -33,25 +48,29 @@ def get_courses():
                 )
             )
 
-        # Course level filter
+        # 课程等级筛选
         if course_levels:
             query = query.filter(Course.course_level.in_(course_levels))
 
-        # Compulsory filter
+        # 是否必修筛选
         if is_compulsory is not None:
             query = query.filter(Course.is_compulsory == is_compulsory)
 
-        # Sorting
+        # 排序
         if hasattr(Course, sort_field):
             sort_column = getattr(Course, sort_field)
             if sort_order.lower() == 'desc':
                 sort_column = sort_column.desc()
             query = query.order_by(sort_column)
 
-        # Pagination
+        # 打印最终 SQL 查询语句（调试用）
+        print("🔎 Final SQL:", str(query.statement.compile(compile_kwargs={'literal_binds': True})))
+
+        # 分页
         pagination = query.paginate(page=page, per_page=page_size, error_out=False)
         courses = pagination.items
 
+        # 返回数据
         return jsonify({
             'code': 200,
             'data': {
@@ -65,6 +84,7 @@ def get_courses():
             'code': 500,
             'message': f'Failed to get course list: {str(e)}'
         }), 500
+
 
 @bp.route('', methods=['POST'])
 @admin_required
@@ -83,14 +103,16 @@ def create_course():
                 }), 400
 
         # Create course
+        is_compulsory = str(data.get('is_compulsory', 'false')).lower() == 'true'
         course = Course(
             course_code=data['course_code'],
             course_name=data['course_name'],
             description=data['description'],
             credit=data['credit'],
             course_level=data['course_level'],
-            is_compulsory=data.get('is_compulsory', False)
+            is_compulsory=is_compulsory
         )
+
 
         db.session.add(course)
         db.session.commit()
@@ -144,26 +166,33 @@ def update_course(course_code):
 @bp.route('', methods=['DELETE'])
 @admin_required
 def delete_courses():
-    """Delete courses in batch"""
+    """Batch delete courses based on course_codes (sent as JSON body)"""
     try:
-        data = request.get_json()
-        course_codes = data.get('course_codes', [])
-
-        if not course_codes:
+        # 更安全的方式处理 DELETE 的 JSON 数据（部分服务器或代理可能屏蔽 DELETE 请求体）
+        if not request.is_json:
             return jsonify({
                 'code': 400,
-                'message': 'Please provide course codes to delete'
+                'message': 'Request must be JSON'
             }), 400
 
-        # Delete courses
-        deleted_count = Course.query.filter(Course.course_code.in_(course_codes)).delete()
+        data = request.get_json(silent=True) or {}
+        course_codes = data.get('course_codes')
+
+        if not course_codes or not isinstance(course_codes, list):
+            return jsonify({
+                'code': 400,
+                'message': 'Please provide course_codes as a list'
+            }), 400
+
+        # 查询并删除课程
+        deleted_count = Course.query.filter(Course.course_code.in_(course_codes)).delete(synchronize_session=False)
         db.session.commit()
 
         return jsonify({
             'code': 200,
             'data': {'deleted_count': deleted_count},
-            'message': 'Courses deleted successfully'
-        })
+            'message': f'{deleted_count} course(s) deleted successfully'
+        }), 200
 
     except Exception as e:
         db.session.rollback()
@@ -171,6 +200,7 @@ def delete_courses():
             'code': 500,
             'message': f'Failed to delete courses: {str(e)}'
         }), 500
+
 
 @bp.route('/import', methods=['POST'])
 @admin_required

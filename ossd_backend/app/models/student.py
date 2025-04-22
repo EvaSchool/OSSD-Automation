@@ -3,23 +3,24 @@ from datetime import datetime
 from enum import Enum
 
 class Month(Enum):
-    JAN = 'Jan'
-    FEB = 'Feb'
-    MAR = 'Mar'
-    APR = 'Apr'
-    MAY = 'May'
-    JUN = 'Jun'
-    JUL = 'Jul'
-    AUG = 'Aug'
-    SEP = 'Sep'
-    OCT = 'Oct'
-    NOV = 'Nov'
-    DEC = 'Dec'
+    JAN = 'JAN'
+    FEB = 'FEB'
+    MAR = 'MAR'
+    APR = 'APR'
+    MAY = 'MAY'
+    JUN = 'JUN'
+    JUL = 'JUL'
+    AUG = 'AUG'
+    SEP = 'SEP'
+    OCT = 'OCT'
+    NOV = 'NOV'
+    DEC = 'DEC'
 
 class GraduationStatus(Enum):
-    IN_PROGRESS = 'In Progress'
-    GRADUATED = 'Graduated'
-    WITHDRAWN = 'Withdrawn'
+    IN_PROGRESS = 'IN_PROGRESS'
+    GRADUATED = 'GRADUATED'
+    WITHDRAWN = 'WITHDRAWN'
+
 
 class Student(db.Model):
     __tablename__ = 'students'

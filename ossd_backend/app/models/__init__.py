@@ -1,15 +1,14 @@
-from app.models.student import Student
-from app.models.course import Course
-from app.models.student_course import StudentCourse
-from app.models.template import Template
-from app.models.user import User
-from app.models.operation_log import OperationLog
+from .user import User, UserRole
+from .course import Course
+from .student import Student
+from .student_course import StudentCourse
+from .template import Template
+from .operation_log import OperationLog
 
 __all__ = [
-    'Student',
+    'User', 'UserRole',
     'Course',
-    'StudentCourse',
+    'Student', 'StudentCourse',
     'Template',
-    'User',
     'OperationLog'
-] 
+]

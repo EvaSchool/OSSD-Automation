@@ -31,6 +31,6 @@ class Course(db.Model):
             'course_name': self.course_name,
             'description': self.description,
             'credit': float(self.credit),
-            'course_level': self.course_level.value,
+            'course_level': self.course_level.value if self.course_level else None,
             'is_compulsory': self.is_compulsory
         }
