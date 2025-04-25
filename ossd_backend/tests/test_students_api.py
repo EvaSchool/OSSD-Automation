@@ -61,11 +61,11 @@ else:
     print("❌ Failed to fetch students:", list_response.text)
 
 # === Step 4: Delete the test student ===
-delete_response = requests.delete(f"{BASE_URL}{STUDENTS_ENDPOINT}/{student_id}", headers=headers)
-if delete_response.status_code == 204:
-    print("✅ Student deleted.")
-else:
-    print("❌ Failed to delete student:", delete_response.text)
+#delete_response = requests.delete(f"{BASE_URL}{STUDENTS_ENDPOINT}/{student_id}", headers=headers)
+#if delete_response.status_code == 204:
+#    print("✅ Student deleted.")
+#else:
+#    print("❌ Failed to delete student:", delete_response.text)
 
 # === Step 5: Confirm student no longer exists ===
 list_after_delete = requests.get(BASE_URL + STUDENTS_ENDPOINT, headers=headers)

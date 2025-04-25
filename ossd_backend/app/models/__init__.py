@@ -1,14 +1,14 @@
 from .user import User, UserRole
-from .course import Course
-from .student import Student
-from .student_course import StudentCourse
+from .course import Course, CourseLevel
+from .student import Student, Month
+from .student_course import StudentCourse, CourseStatus
 from .template import Template
 from .operation_log import OperationLog
 
 __all__ = [
     'User', 'UserRole',
-    'Course',
-    'Student', 'StudentCourse',
+    'Course', 'CourseLevel',
+    'Student', 'Month', 'StudentCourse', 'CourseStatus',
     'Template',
     'OperationLog'
 ]

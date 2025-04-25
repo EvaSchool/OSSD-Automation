@@ -21,6 +21,12 @@ class GraduationStatus(Enum):
     GRADUATED = 'GRADUATED'
     WITHDRAWN = 'WITHDRAWN'
 
+class GradeLevel(Enum):
+    GRADE_9 = '9'
+    GRADE_10 = '10'
+    GRADE_11 = '11'
+    GRADE_12 = '12'
+
 
 class Student(db.Model):
     __tablename__ = 'students'
@@ -41,6 +47,8 @@ class Student(db.Model):
     address = db.Column(db.Text, comment='学生地址（格式：街道, 城市, 省, 国家）')
     graduation_status = db.Column(db.Enum(GraduationStatus), nullable=False, default=GraduationStatus.IN_PROGRESS, comment='毕业状态')
     volunteer_hours = db.Column(db.Integer, nullable=False, default=0, comment='义工时数（≥0）')
+    grade = db.Column(db.Enum(GradeLevel), nullable=False, default=GradeLevel.GRADE_9, comment='学生当前年级')
+
     
     # 关联关系
     courses = db.relationship('StudentCourse', back_populates='student', cascade='all, delete-orphan')
@@ -62,5 +70,7 @@ class Student(db.Model):
             'expected_graduation_day': self.expected_graduation_day,
             'address': self.address,
             'graduation_status': self.graduation_status.value,
-            'volunteer_hours': self.volunteer_hours
+            'volunteer_hours': self.volunteer_hours,
+            'grade': self.grade.value
+
         } 

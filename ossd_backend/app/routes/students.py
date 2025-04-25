@@ -3,34 +3,61 @@ from app.models.student import Student, Month, GraduationStatus
 from app import db
 from flask_jwt_extended import jwt_required
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_
+from app.utils import parse_enum 
 
 bp = Blueprint('students', __name__)
 
-
-# 👇 工具函数：用于规范化枚举值输入
-def normalize_enum_input(value: str | None, default: str = 'IN_PROGRESS') -> str:
-    if not value:
-        return default
-    return value.strip().upper().replace(' ', '_')
-
-
-# ✅ 获取所有学生
 @bp.route('', methods=['GET'])
 @jwt_required()
 def get_students():
-    students = Student.query.all()
-    return jsonify([student.to_dict() for student in students])
+    query = Student.query
 
+    # 筛选参数
+    keyword = request.args.get('keyword', '').strip()
+    grade = request.args.get('grade')
+    enrollment_year = request.args.get('enrollment_year', type=int)
+    enrollment_month = request.args.get('enrollment_month')
 
-# ✅ 获取单个学生
+    if keyword:
+        query = query.filter(or_(
+            Student.first_name.ilike(f'%{keyword}%'),
+            Student.last_name.ilike(f'%{keyword}%'),
+            Student.OEN.ilike(f'%{keyword}%')
+        ))
+
+    if grade:
+        query = query.filter(Student.grade == grade)
+
+    if enrollment_year:
+        query = query.filter(Student.enrollment_year == enrollment_year)
+
+    if enrollment_month:
+        try:
+            month_enum = parse_enum(enrollment_month, Month)
+            query = query.filter(Student.enrollment_month == month_enum)
+        except Exception:
+            return jsonify({'error': f'Invalid enrollment_month: {enrollment_month}'}), 400
+
+    # 分页
+    page = request.args.get('page', 1, type=int)
+    page_size = request.args.get('page_size', 10, type=int)
+    pagination = query.paginate(page=page, per_page=page_size, error_out=False)
+
+    return jsonify({
+        'code': 200,
+        'data': {
+            'total': pagination.total,
+            'list': [s.to_dict() for s in pagination.items]
+        }
+    })
+
 @bp.route('/<int:id>', methods=['GET'])
 @jwt_required()
 def get_student(id):
     student = Student.query.get_or_404(id)
     return jsonify(student.to_dict())
 
-
-# ✅ 创建新学生
 @bp.route('', methods=['POST'])
 @jwt_required()
 def create_student():
@@ -41,17 +68,18 @@ def create_student():
             first_name=data['first_name'],
             OEN=data['OEN'],
             birth_year=data['birth_year'],
-            birth_month=Month[normalize_enum_input(data['birth_month'], 'JAN')],
+            birth_month=parse_enum(data['birth_month'], Month),
             birth_day=data['birth_day'],
             enrollment_year=data['enrollment_year'],
-            enrollment_month=Month[normalize_enum_input(data['enrollment_month'], 'SEP')],
+            enrollment_month=parse_enum(data['enrollment_month'], Month),
             enrollment_day=data['enrollment_day'],
             expected_graduation_year=data['expected_graduation_year'],
-            expected_graduation_month=Month[normalize_enum_input(data.get('expected_graduation_month'), 'JUN')],
+            expected_graduation_month=parse_enum(data.get('expected_graduation_month', 'JUN'), Month),
             expected_graduation_day=data.get('expected_graduation_day', 30),
             address=data.get('address'),
-            graduation_status=GraduationStatus[normalize_enum_input(data.get('graduation_status'))],
-            volunteer_hours=data.get('volunteer_hours', 0)
+            graduation_status=parse_enum(data.get('graduation_status', 'IN_PROGRESS'), GraduationStatus),
+            volunteer_hours=data.get('volunteer_hours', 0),
+            grade=data.get('grade', '9')
         )
 
         db.session.add(student)
@@ -59,13 +87,11 @@ def create_student():
         return jsonify(student.to_dict()), 201
 
     except KeyError as e:
-        return jsonify({'error': f'Missing or invalid field: {str(e)}'}), 400
+        return jsonify({'error': f'Missing field: {str(e)}'}), 400
     except IntegrityError:
         db.session.rollback()
         return jsonify({'error': 'OEN must be unique'}), 400
 
-
-# ✅ 更新学生信息
 @bp.route('/<int:id>', methods=['PUT'])
 @jwt_required()
 def update_student(id):
@@ -76,31 +102,20 @@ def update_student(id):
         'last_name', 'first_name', 'OEN', 'birth_year', 'birth_month', 'birth_day',
         'enrollment_year', 'enrollment_month', 'enrollment_day',
         'expected_graduation_year', 'expected_graduation_month', 'expected_graduation_day',
-        'address', 'graduation_status', 'volunteer_hours'
+        'address', 'graduation_status', 'volunteer_hours', 'grade'
     ]:
         if field in data:
             value = data[field]
-
             if field in ['birth_month', 'enrollment_month', 'expected_graduation_month']:
-                try:
-                    setattr(student, field, Month[normalize_enum_input(value)])
-                except KeyError:
-                    return jsonify({'error': f'Invalid month value: {value}'}), 400
-
+                setattr(student, field, parse_enum(value, Month))
             elif field == 'graduation_status':
-                try:
-                    setattr(student, field, GraduationStatus[normalize_enum_input(value)])
-                except KeyError:
-                    return jsonify({'error': f'Invalid graduation_status value: {value}'}), 400
-
+                setattr(student, field, parse_enum(value, GraduationStatus))
             else:
                 setattr(student, field, value)
 
     db.session.commit()
     return jsonify(student.to_dict())
 
-
-# ✅ 删除学生
 @bp.route('/<int:id>', methods=['DELETE'])
 @jwt_required()
 def delete_student(id):
