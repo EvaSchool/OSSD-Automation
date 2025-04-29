@@ -9,6 +9,12 @@ import os
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from enum import Enum
+
+class TemplateStorage(Enum):
+    WORD = 'word'   # 便于未来支持 ppt 等  
+    PDF  = 'pdf'
+
 
 bp = Blueprint('templates', __name__, url_prefix='/api/v1/templates')
 

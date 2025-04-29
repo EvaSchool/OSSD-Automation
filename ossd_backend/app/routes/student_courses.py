@@ -6,6 +6,7 @@ from app.utils import admin_required
 from app import db
 from app.models import StudentCourse, Student, Course, CourseStatus, Month, OperationLog, Template
 from datetime import datetime
+from sqlalchemy import func
 
 bp = Blueprint('student_courses', __name__, url_prefix='/api/v1/student_courses')
 
@@ -29,18 +30,16 @@ def list_student_courses():
         # 构建查询
         query = StudentCourse.query.join(Student)
 
-        # 学生姓名精确搜索
+        # 学生姓名模糊搜索（支持部分 first_name, last_name, 全名模糊）
         if student_name:
-            names = student_name.split()
-            if len(names) == 2:
-                query = query.filter(
-                    and_(
-                        Student.first_name == names[0],
-                        Student.last_name == names[1]
-                    )
+            student_name = student_name.strip()
+            query = query.filter(
+                or_(
+                    func.concat(Student.first_name, ' ', Student.last_name).ilike(f'%{student_name}%'),
+                    Student.first_name.ilike(f'%{student_name}%'),
+                    Student.last_name.ilike(f'%{student_name}%')
                 )
-            else:
-                return jsonify({'code': 400, 'message': 'Please provide both first name and last name'}), 400
+            )    
 
         # 课程代码过滤
         if course_code:
