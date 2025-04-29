@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from app.models import Course, CourseLevel
 from app import db
 from app.utils import admin_required, parse_enum
+print("✅ app.utils.parse_enum 已导入")
 from sqlalchemy import or_
 import csv
 from io import StringIO

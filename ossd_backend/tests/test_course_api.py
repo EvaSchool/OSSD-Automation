@@ -69,7 +69,7 @@ update_data = {
     "course_name": "Updated Test Course",
     "description": "Updated description.",
     "credit": 0.5,
-    "course_level": "ESL1",
+    "course_level": "12",
     "is_compulsory": False
 }
 update_response = requests.put(f"{BASE_URL + COURSES_ENDPOINT}/{test_course_code}", json=update_data, headers=headers)
