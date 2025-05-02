@@ -2,7 +2,7 @@ from .user import User, UserRole
 from .course import Course, CourseLevel
 from .student import Student, Month
 from .student_course import StudentCourse, CourseStatus
-from .template import Template
+from .template import Template, TemplateType
 from .operation_log import OperationLog
 
 __all__ = [
