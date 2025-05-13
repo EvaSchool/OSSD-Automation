@@ -15,25 +15,41 @@ app = create_app()
 TEMPLATE_CONFIG = [
     {
         "template_type": TemplateType.WELCOME_LETTER,
-        "file_path": "templates/WELCOME_LETTER/EVA-Welcome Letter 2025.docx",
+        "file_path": "ossd_backend/templates/WELCOME_LETTER/EVA-Welcome Letter 2025.docx",
         "description": "Welcome Letter"
     },
     {
         "template_type": TemplateType.LETTER_OF_ENROLMENT,
-        "file_path": "templates/LETTER_OF_ENROLMENT/EVA-Enrollment Letter 2025.docx",
+        "file_path": "ossd_backend/templates/LETTER_OF_ENROLMENT/EVA-Enrollment Letter 2025.docx",
         "description": "Enrollment Letter"
     },
     {
         "template_type": TemplateType.LETTER_OF_ACCEPTANCE,
-        "file_path": "templates/LETTER_OF_ACCEPTANCE/EVA-LOA 2025.docx",
+        "file_path": "ossd_backend/templates/LETTER_OF_ACCEPTANCE/EVA-LOA 2025.docx",
         "description": "Letter of Acceptance"
     },
     {
         "template_type": TemplateType.PREDICTED_GRADES,
-        "file_path": "templates/PREDICTED_GRADES/EVA-Enrollment Letter and Predicted Grades 2025.docx",
+        "file_path": "ossd_backend/templates/PREDICTED_GRADES/EVA-Enrollment Letter and Predicted Grades 2025.docx",
         "description": "Enrollment + Predicted Grades"
+    },
+    {
+        "template_type": TemplateType.REPORT_CARD,
+        "file_path": "ossd_backend/templates/REPORT_CARD/eva_report_card.pdf",
+        "description": "PDF Report Card"
+    },
+    {
+        "template_type": TemplateType.TRANSCRIPT,
+        "file_path": "ossd_backend/templates/TRANSCRIPT/eva_transcript.pdf",
+        "description": "PDF OST"
+    },
+    {
+        "template_type": TemplateType.FINAL_TRANSCRIPT,
+        "file_path": "ossd_backend/templates/FINAL_TRANSCRIPT/eva_final_transcript.pdf",
+        "description": "PDF Final OST"
     }
 ]
+
 
 if __name__ == "__main__":
     with app.app_context():

@@ -45,5 +45,19 @@ def create_app(config_name='default'):
     app.register_blueprint(courses.bp, url_prefix='/api/v1/courses')
     print(f"  ✅ 已注册课程蓝图: /api/v1/courses")
     
+    from app.routes import templates
+    app.register_blueprint(templates.bp, url_prefix='/api/v1/templates')
+    print(f"  ✅ 已注册模板蓝图: /api/v1/templates")
+
+    from app.routes import student_courses
+    app.register_blueprint(student_courses.bp, url_prefix='/api/v1/student_courses')
+    print(f"  ✅ 已注册学生课程蓝图: /api/v1/student_courses")
+
+    '''
+    from app.routes import generate
+    app.register_blueprint(generate.bp, url_prefix='/api/v1/generate')
+    print(f"  ✅ 已注册文档生成蓝图: /api/v1/generate")
+    '''
+
     print("📡 应用创建完成")
     return app

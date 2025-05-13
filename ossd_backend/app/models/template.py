@@ -8,6 +8,7 @@ class TemplateType(Enum):
     LETTER_OF_ENROLMENT = 'LetterOfEnrolment'
     LETTER_OF_ACCEPTANCE = 'LetterOfAcceptance'
     WELCOME_LETTER = 'WelcomeLetter'
+    FINAL_TRANSCRIPT = 'FinalTranscript'
 
 class Template(db.Model):
     __tablename__ = 'templates'

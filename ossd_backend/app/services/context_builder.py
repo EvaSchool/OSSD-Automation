@@ -5,8 +5,48 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Dict, Any, List
-
+import random
 from app.models import Student, Course
+from app.models.student_course import StudentCourse
+from app.services.learning_comments import LEARNING_COMMENTS
+
+
+# ──────────────── 默认教师名单 ────────────────
+DEFAULT_TEACHERS = {
+    "ASM2O": "Emily Dawson",
+    "AVI2O": "Jacob Whitman",
+    "BAF3M": "Laura Bennett",
+    "BAT4M": "Nathan Harris",
+    "BBB4M": "Olivia Sanders",
+    "BEP2O": "William Turner",
+    "BOH4M": "Ashley Reed",
+    "CHC2D": "Kevin Brooks",
+    "CHV2O": "Megan Sullivan",
+    "CIA4U": "Ryan Webster",
+    "ENG3U": "Samantha Fraser",
+    "ENG4U": "Thomas Blake",
+    "ESLBO": "Julia Morton",
+    "ESLCO": "Henry Patterson",
+    "ESLDO": "Chloe Matthews",
+    "ESLEO": "Liam Campbell",
+    "GLC2O": "Nicole Jenkins",
+    "HHS4U": "Andrew Clarke",
+    "HSB4U": "Sophie Richardson",
+    "LKBDU": "Mark Douglas",
+    "MCR3U": "Natalie Graham",
+    "MCV4U": "Stephen Moore",
+    "MDM4U": "Isabelle Long",
+    "MHF4U": "Benjamin Scott",
+    "MPM2D": "Caroline Lewis",
+    "OLC4O": "Zachary Palmer",
+    "SBI3U": "Hailey Morgan",
+    "SBI4U": "Peter Adams",
+    "SCH3U": "Victoria Ellis",
+    "SCH4U": "Daniel Carter",
+    "SNC2D": "Brianna Taylor",
+    "SPH3U": "Eric Thompson",
+    "SPH4U": "Rachel Stevens",
+}
 
 
 # ──────────────── 基础学生字段 ────────────────
@@ -70,3 +110,257 @@ def build_course_desc_context(courses: List[Course]) -> Dict[str, Any]:
             for c in courses
         ]
     }
+
+
+
+def infer_learning_skills(score: int) -> dict[str, str]:
+    """
+    根据成绩推断 R/O/W/C/I/S 六项学习技能等级（E/G/S）
+    返回字段：{"R": "E", "O": "E", ..., "S": "E"}
+    """
+    domains = ["R", "O", "W", "C", "I", "S"]  # Responsibility, Organization, ...
+
+    if score >= 95:
+        return {d: "E" for d in domains}
+
+    elif 90 <= score < 95:
+        downgrade = random.sample(domains, 1)
+        return {d: ("G" if d in downgrade else "E") for d in domains}
+
+    elif 85 <= score < 90:
+        downgrade = random.sample(domains, 2)
+        return {d: ("G" if d in downgrade else "E") for d in domains}
+
+    elif 80 <= score < 85:
+        downgrade = random.sample(domains, 4)
+        return {d: ("G" if d in downgrade else "E") for d in domains}
+
+    elif 75 <= score < 80:
+        return {d: "G" for d in domains}
+
+    elif 70 <= score < 75:
+        downgrade = random.sample(domains, 1)
+        return {d: ("S" if d in downgrade else "G") for d in domains}
+
+    else:
+        return {d: "S" for d in domains}
+
+
+def generate_comment(levels: dict[str, str]) -> str:
+    """
+    根据每个领域的等级，从语料库中抽取评语并组合成自然段落。
+    """
+    segments = []
+    for domain, grade in levels.items():
+        options = LEARNING_COMMENTS.get(domain, {}).get(grade, [])
+        if options:
+            segments.append(random.choice(options))
+    return " ".join(segments)
+
+# ──────────────── Report Card ────────────────
+def build_report_card_context(
+    student: Student,
+    student_courses: List[StudentCourse],
+    extra_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    构建用于 Report Card 的渲染上下文，结合数据库与手动填写数据。
+    """
+    base = build_student_context(student)
+
+    # 学校与顶部字段
+    base.update({
+        "semester": extra_data.get("semester", "1"),
+        "reporting": extra_data.get("reporting", "1"),
+        "homeroom": extra_data.get("homeroom", "N/A"),
+        "principal": "Eric Tran",
+        "schoolName": "Emerald Valley Academy",
+        "schoolAddr": "170 Sheppard Ave E, North York, ON M2N 3A4",
+        "schoolTel": "+1 437-268-6158",
+        "schoolFax": "",
+        "schoolBoard": "Private School",
+        "schoolWeb": "https://evaschool.ca/",
+        "schoolBSID": "BSID: 887678",
+    })
+
+    rows = []
+    reporting_period = extra_data.get("reporting", "1")
+
+    for sc in student_courses:
+        course = sc.course
+        cid = str(sc.id)
+
+        mid_score = sc.midterm_grade or 0
+        final_score = sc.final_grade or mid_score
+
+        mid_skills = infer_learning_skills(mid_score)
+        final_skills = infer_learning_skills(final_score)
+
+        # 根据 reporting 生成不同的评语
+        if reporting_period == "1":
+            comment = generate_comment(mid_skills)
+        else:
+            comment = generate_comment(final_skills)
+
+        rows.append({
+            "courseTitle": course.course_name,
+            "courseCode": course.course_code,
+            "teacher": extra_data.get(f"{cid}_teacher", DEFAULT_TEACHERS.get(course.course_code, "TBD")),
+            "midmark": sc.midterm_grade or "",
+            "finalmark": sc.final_grade or "",
+            "midmedian": "",
+            "finalmedian": "",
+            "midCR": "",
+            "finalCR": f"{course.credit:.2f}",
+            # 学习技能等级（优先使用手动填写）
+            "midR": extra_data.get(f"{cid}_midR", mid_skills["R"]),
+            "finalR": extra_data.get(f"{cid}_finalR", final_skills["R"]),
+            "midO": extra_data.get(f"{cid}_midO", mid_skills["O"]),
+            "finalO": extra_data.get(f"{cid}_finalO", final_skills["O"]),
+            "midW": extra_data.get(f"{cid}_midW", mid_skills["W"]),
+            "finalW": extra_data.get(f"{cid}_finalW", final_skills["W"]),
+            "midC": extra_data.get(f"{cid}_midC", mid_skills["C"]),
+            "finalC": extra_data.get(f"{cid}_finalC", final_skills["C"]),
+            "midI": extra_data.get(f"{cid}_midI", mid_skills["I"]),
+            "finalI": extra_data.get(f"{cid}_finalI", final_skills["I"]),
+            "midS": extra_data.get(f"{cid}_midS", mid_skills["S"]),
+            "finalS": extra_data.get(f"{cid}_finalS", final_skills["S"]),
+            # 出勤
+            "midClassMissed": extra_data.get(f"{cid}_midClassMissed", 0),
+            "midTotalClass": extra_data.get(f"{cid}_midTotalClass", 0),
+            "midTimesLate": extra_data.get(f"{cid}_midTimesLate", 0),
+            "finalClassMissed": extra_data.get(f"{cid}_finalClassMissed", 0),
+            "finalTotalClass": extra_data.get(f"{cid}_finalTotalClass", 0),
+            "finalTimesLate": extra_data.get(f"{cid}_finalTimesLate", 0),
+            # 留评语（优先使用手动填写）
+            "comment": extra_data.get(f"{cid}_comment", comment),
+        })
+
+    base["RC_COURSES"] = rows
+    return base
+
+# ──────────────── 示例数据 ────────────────
+"""
+extra_data = {
+    "semester": "1",
+    "reporting": "2",
+    "homeroom": "N/A",
+    "12_teacher": "Mr. Smith",
+    "12_midR": "E", "12_finalR": "G",
+    "12_midO": "G", "12_finalO": "G",
+    "12_midW": "S", "12_finalW": "E",
+    "12_midC": "N", "12_finalC": "S",
+    "12_midI": "G", "12_finalI": "E",
+    "12_midS": "S", "12_finalS": "G",
+    "12_comment": "Excellent participation.",
+    "12_midClassMissed": 0, "12_midTotalClass": 20, "12_midTimesLate": 1,
+    "12_finalClassMissed": 1, "12_finalTotalClass": 40, "12_finalTimesLate": 0,
+
+    "13_teacher": "Ms. Lee",
+    "13_midR": "G", "13_finalR": "G",
+    "13_midO": "S", "13_finalO": "S",
+    "13_midW": "N", "13_finalW": "S",
+    "13_midC": "S", "13_finalC": "S",
+    "13_midI": "E", "13_finalI": "G",
+    "13_midS": "G", "13_finalS": "G",
+    "13_comment": "Needs improvement in homework.",
+    "13_midClassMissed": 2, "13_midTotalClass": 18, "13_midTimesLate": 3,
+    "13_finalClassMissed": 3, "13_finalTotalClass": 35, "13_finalTimesLate": 1,
+}
+"""
+def build_transcript_context(student: Student, student_courses: List[StudentCourse], is_final: bool = False, extra_data: dict = {}) -> dict[str, str]:
+    from datetime import datetime
+
+    ctx: dict[str, str] = {}
+
+    # 日期 & 页码支持手动覆写
+    ctx["date"] = extra_data.get("date", datetime.now().strftime("%Y-%m-%d"))
+    ctx["currPage"] = extra_data.get("currPage", "1")
+    ctx["totalPage"] = extra_data.get("totalPage", "1")
+
+    # 学生基础信息
+    ctx["lastName"] = student.last_name
+    ctx["firstName"] = student.first_name
+    ctx["OEN"] = student.oen
+    ctx["dobYear"] = str(student.birth_year)
+    ctx["dobMonth"] = student.birth_month.value
+    ctx["dobDay"] = str(student.birth_day)
+    ctx["enrollYear"] = str(student.enrollment_year)
+    ctx["enrollMonth"] = student.enrollment_month.value
+    ctx["enrollDay"] = str(student.enrollment_day)
+
+    # 自动 studentNo = YYMM + last2(student_id) + DOB
+    suffix = f"{student.id:02d}"[-2:]
+    dob_str = f"{student.birth_year % 100:02d}{student.birth_month.value:02d}{student.birth_day:02d}"
+    ctx["studentNo"] = f"{student.enrollment_year % 100:02d}{student.enrollment_month.value:02d}{suffix}{dob_str}"
+
+    # 学校字段
+    ctx["schoolBoard"] = "Private"
+    ctx["boardNumber"] = ""
+    ctx["schoolName"] = "Emerald Valley Academy"
+    ctx["schoolNo"] = "887678"
+
+    # Final OST 额外字段
+    if is_final:
+        ctx["gradYear"] = str(student.expected_graduation_year)
+
+    # 课程分发（最多23）
+    ple_course = next((sc for sc in student_courses if sc.course_code == "PLE"), None)
+    others = [sc for sc in student_courses if sc.course_code != "PLE"]
+    rows = []
+
+    # PLE 特殊行（放第1个）
+    if ple_course:
+        ple = ple_course
+        rows.append({
+            "code": "PLE",
+            "course": "Equivalent Credits",
+            "level": "",
+            "grade": "EQV",
+            "cr": str(int(ple.midterm_grade or 0)),
+            "compul": str(int(ple.final_grade or 0)),
+            "note": "",
+            "month": str(ple.start_month.value),
+            "year": f"*{ple.start_year}"
+        })
+
+    # 正常课程（本地/外校判断）
+    for sc in others:
+        c = sc.course
+        rows.append({
+            "code": c.course_code,
+            "course": c.course_name,
+            "level": (
+                c.course_level.name[-1] if c.course_level.name.startswith("ESL")
+                else c.course_level.name[-2:]
+            ),
+            "grade": str(sc.final_grade) if sc.final_grade is not None else "",
+            "cr": f"{c.credit:.1f}",
+            "compul": "X" if sc.is_compulsory else "",
+            "note": "",
+            "month": str(sc.start_month.value),
+            "year": f"*{sc.start_year}" if not sc.is_local else str(sc.start_year)
+        })
+
+    rows = rows[:23]
+
+    for i, row in enumerate(rows, start=1):
+        for k, v in row.items():
+            ctx[f"{k}{i}"] = v
+
+    # 总学分统计
+    total_cr = 0
+    total_compul = 0
+    for sc in student_courses:
+        if sc.course_code == "PLE":
+            total_cr += sc.midterm_grade or 0
+            total_compul += sc.final_grade or 0
+        else:
+            total_cr += sc.course.credit or 0
+            if sc.is_compulsory:
+                total_compul += 1
+
+    ctx["totalcr"] = str(int(total_cr))
+    ctx["totalcompul"] = str(int(total_compul))
+
+    return ctx

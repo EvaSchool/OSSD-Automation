@@ -1,22 +1,21 @@
 """
 通用文档渲染 + LibreOffice PDF 转换服务
 """
-
 from __future__ import annotations
 import subprocess
 import uuid
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Literal
 
 from docxtpl import DocxTemplate
 from flask import current_app
 from app import db
 from app.models import Template as TemplateModel, TemplateType, OperationLog
 from . import context_builder as ctxb
+from .context_builder import build_transcript_context, build_report_card_context
 
-
-OUTPUT_ROOT = Path("generated_docs")
+OUTPUT_ROOT = Path("ossd_backend/generated_docs")
 
 
 class DocumentService:
@@ -26,16 +25,13 @@ class DocumentService:
     # 通用入口
     # ─────────────────────────────
     @classmethod
-    def generate(cls, tpl_type: TemplateType, context: Dict[str, Any], user_id: int) -> Path:
-        tpl_rec: TemplateModel | None = TemplateModel.query.filter_by(template_type=tpl_type).first()
-        if not tpl_rec:
-            raise FileNotFoundError(f"模板 {tpl_type.value} 未上传")
+    def generate_word_template(cls, tpl_type: TemplateType, context: Dict[str, Any], user_id: int,
+                                output_format: Literal["docx", "flatten_pdf"] = "flatten_pdf") -> Path:
+        tpl_rec = TemplateModel.query.filter_by(template_type=tpl_type).first()
+        if not tpl_rec or not Path(tpl_rec.file_path).exists():
+            raise FileNotFoundError(f"模板 {tpl_type.value} 未找到")
 
         tpl_path = Path(tpl_rec.file_path)
-        if not tpl_path.exists():
-            raise FileNotFoundError(f"模板文件不存在: {tpl_path}")
-
-        # ① 渲染 DOCX
         doc = DocxTemplate(str(tpl_path))
         doc.render(context)
 
@@ -44,13 +40,13 @@ class DocumentService:
         docx_path = out_dir / f"{uuid.uuid4().hex}.docx"
         doc.save(docx_path)
 
-        # ② 转 PDF（失败则返回 DOCX）
-        final_path = cls._convert_to_pdf(docx_path) or docx_path
+        final_path = docx_path
+        if output_format == "flatten_pdf":
+            final_path = cls._convert_to_pdf(docx_path) or docx_path
 
-        # ③ 写操作日志
         log = OperationLog(
             user_id=user_id,
-            operation_type="generate_document",
+            operation_type="generate_word_template",
             operation_detail=f"生成 {tpl_type.value} → {final_path.name}",
             target_table="templates",
             target_id=tpl_rec.id,
@@ -60,6 +56,71 @@ class DocumentService:
         db.session.commit()
 
         return final_path
+
+    # ─────────────────────────────────────────
+    # 通用：PDF 表单模板 → 填充 / flatten_pdf
+    # ─────────────────────────────────────────
+    @classmethod
+    def generate_pdf_form_template(cls, tpl_type: TemplateType, context: Dict[str, Any], user_id: int,
+                                   flatten: bool = False) -> Path:
+        tpl_rec = TemplateModel.query.filter_by(template_type=tpl_type).first()
+        if not tpl_rec or not Path(tpl_rec.file_path).exists():
+            raise FileNotFoundError(f"模板 {tpl_type.value} 未找到")
+
+        filled_path = cls._fill_pdf_template(Path(tpl_rec.file_path), context)
+        final_path = cls._flatten_pdf(filled_path) if flatten else filled_path
+
+        log = OperationLog(
+            user_id=user_id,
+            operation_type="generate_pdf_form_template",
+            operation_detail=f"生成 {tpl_type.value} → {final_path.name}",
+            target_table="templates",
+            target_id=tpl_rec.id,
+            created_at=datetime.now(),
+        )
+        db.session.add(log)
+        db.session.commit()
+
+        return final_path
+
+    # ─────────────────────────────────────────
+    # 填充 PDF 表单
+    # ─────────────────────────────────────────
+    @staticmethod
+    def _fill_pdf_template(pdf_path: Path, context: dict[str, str]) -> Path:
+        from PyPDF2 import PdfReader, PdfWriter
+
+        output_path = pdf_path.with_stem(pdf_path.stem + "_filled")
+        reader = PdfReader(str(pdf_path))
+        writer = PdfWriter()
+
+        page = reader.pages[0]
+        writer.add_page(page)
+        writer.update_page_form_field_values(writer.pages[0], context)
+
+        with open(output_path, "wb") as f:
+            writer.write(f)
+
+        return output_path
+    
+    # ─────────────────────────────────────────
+    # PDF 表单 → Flatten
+    # ─────────────────────────────────────────
+    @staticmethod
+    def _flatten_pdf(input_path: Path) -> Path:
+        output_path = input_path.with_stem(input_path.stem + "_flat")
+        try:
+            subprocess.run(
+                ["pdftoppm", "-png", str(input_path), str(output_path.with_suffix(""))], check=True
+            )
+            subprocess.run(
+                ["convert", str(output_path.with_name(output_path.stem + "-1.png")), str(output_path)], check=True
+            )
+            return output_path
+        except Exception as e:
+            current_app.logger.warning("PDF flatten 失败: %s", e)
+            return input_path
+        
 
     # ─────────────────────────────
     # Welcome Letter
@@ -111,21 +172,18 @@ class DocumentService:
         return cls.generate(TemplateType.PREDICTED_GRADES, ctx, user_id)
 
     # ─────────────────────────────
-    # 预留：Transcript / ReportCard (PDF模板)
+    # Transcript / ReportCard (PDF模板)
     # ─────────────────────────────
     @classmethod
-    def generate_transcript_pdf(cls, student, data: Dict[str, Any], user_id: int) -> Path:
-        """
-        预留接口：未来填充 PDF 表单（非 Word 模板）
-        """
-        raise NotImplementedError("Transcript PDF 生成功能待实现")
+    def generate_transcript_pdf(cls, student, student_courses, is_final: bool, user_id: int, extra_data: dict = {}):
+        tpl_type = TemplateType.FINAL_TRANSCRIPT if is_final else TemplateType.TRANSCRIPT
+        ctx = build_transcript_context(student, student_courses, is_final, extra_data)
+        return cls.generate_pdf_form_template(tpl_type, ctx, user_id, flatten=True)
 
     @classmethod
-    def generate_report_card_pdf(cls, student, course_data: Dict[str, Any], user_id: int) -> Path:
-        """
-        预留接口：Report Card 生成（PDF 填表）
-        """
-        raise NotImplementedError("Report Card PDF 生成功能待实现")
+    def generate_report_card_pdf(cls, student, student_courses, reporting: str, user_id: int, extra_data: dict = {}):
+        ctx = build_report_card_context(student, student_courses, extra_data | {"reporting": reporting})
+        return cls.generate_pdf_form_template(TemplateType.REPORT_CARD, ctx, user_id, flatten=True)
 
     # ─────────────────────────────
     # LibreOffice 转 PDF

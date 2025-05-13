@@ -1,9 +1,3 @@
-"""
-app/routes/templates.py
-~~~~~~~~~~~~~~~~~~~~~~~
-– 模板管理 + 文档生成 统一路由
-"""
-
 from __future__ import annotations
 
 import os
@@ -27,6 +21,7 @@ from app.models import (
     TemplateType,
     Student,
     Course,
+    StudentCourse,
 )
 from app.utils import admin_required
 from app.services.document_service import DocumentService
@@ -38,30 +33,21 @@ from app.services.context_builder import (
 
 bp = Blueprint("templates", __name__, url_prefix="/api/v1/templates")
 
-# ---------------------------------------------------------------------
-# 1️⃣  模板 CRUD
-# ---------------------------------------------------------------------
+UPLOAD_ROOT = Path("templates")
 
-UPLOAD_ROOT = Path("templates")  # 相对项目根目录
-
-
+# ------------------------ 模板 CRUD ------------------------
 @bp.route("", methods=["POST"])
 @admin_required
 def upload_template():
-    """上传 Word/PDF 模板"""
     tpl_type_raw = request.form.get("template_type", "")
     file = request.files.get("file")
     if not file or not tpl_type_raw:
         return jsonify(code=400, message="template_type 与 file 均必填"), 400
 
-    try:
-        tpl_type = _parse_template_type(tpl_type_raw)
-        if not tpl_type:
-            return jsonify(code=400, message="无效的 template_type"), 400
-    except KeyError:
+    tpl_type = _parse_template_type(tpl_type_raw)
+    if not tpl_type:
         return jsonify(code=400, message="无效的 template_type"), 400
 
-    # 保存文件
     suffix = Path(file.filename).suffix
     uuid_name = f"{uuid.uuid4().hex}{suffix}"
     save_dir = UPLOAD_ROOT / tpl_type.value
@@ -82,7 +68,6 @@ def upload_template():
 @bp.route("", methods=["GET"])
 @jwt_required()
 def list_templates():
-    """分页 + 按类型过滤"""
     q_type = request.args.get("template_type")
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("page_size", 10, type=int)
@@ -94,24 +79,15 @@ def list_templates():
         except KeyError:
             return jsonify(code=400, message="无效的 template_type"), 400
 
-    pagination = query.order_by(Template.id.desc()).paginate(page=page, per_page=per_page, error_out=False)
-    data = [
-        {
-            "id": t.id,
-            "template_type": t.template_type.value,
-            "description": t.description,
-            "file_path": t.file_path,
-        }
-        for t in pagination.items
-    ]
+    pagination = query.order_by(Template.template_id.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    data = [t.to_dict() for t in pagination.items]
     return jsonify(code=200, data={"total": pagination.total, "list": data})
 
 
 @bp.route("/<int:tpl_id>", methods=["PUT"])
 @admin_required
 def update_template(tpl_id):
-    """重新上传文件或修改描述"""
-    tpl: Template = Template.query.get_or_404(tpl_id)
+    tpl = Template.query.get_or_404(tpl_id)
 
     if "description" in request.form:
         tpl.description = request.form["description"]
@@ -133,9 +109,7 @@ def update_template(tpl_id):
 @bp.route("/<int:tpl_id>", methods=["DELETE"])
 @admin_required
 def delete_template(tpl_id):
-    """删除模板（硬删）"""
-    tpl: Template = Template.query.get_or_404(tpl_id)
-    # 删除磁盘文件
+    tpl = Template.query.get_or_404(tpl_id)
     try:
         os.remove(tpl.file_path)
     except FileNotFoundError:
@@ -145,19 +119,9 @@ def delete_template(tpl_id):
     return jsonify(code=200, message="模板已删除")
 
 
-# ---------------------------------------------------------------------
-# 2️⃣  文档生成接口（所有生成动作都走 /templates/.../generate/...）
-# ---------------------------------------------------------------------
-
+# ------------------------ 文档生成 ------------------------
 
 def _parse_template_type(raw: str) -> TemplateType | None:
-    """
-    将路径里的 template_type 字符串映射到枚举：
-    • name  :  WELCOME_LETTER / REPORT_CARD ...
-    • value :  WelcomeLetter  / ReportCard  ...
-    • slug  :  welcome_letter / report_card ...
-    不区分大小写，匹配到就返回枚举，否则 None
-    """
     raw_lc = raw.replace("-", "_").lower()
     for tt in TemplateType:
         if raw_lc in (tt.name.lower(), tt.value.lower()):
@@ -165,94 +129,94 @@ def _parse_template_type(raw: str) -> TemplateType | None:
     return None
 
 
-
-# ---------------- 单学生 ----------------
 @bp.route("/<template_type>/generate/student/<int:student_id>", methods=["POST"])
 @jwt_required()
 def generate_single(template_type: str, student_id: int):
-    """根据模板为单个学生生成文档"""
     tpl_type = _parse_template_type(template_type)
     if not tpl_type:
         return jsonify(code=400, message="无效的 template_type"), 400
 
-    student: Student = Student.query.get_or_404(student_id)
+    student = Student.query.get_or_404(student_id)
     body = request.get_json() or {}
+    course_ids = body.get("course_ids", [])
+    courses = Course.query.filter(Course.id.in_(course_ids)).all() if course_ids else []
+    predicted_map = body.get("predicted_map", {})
+    reporting = body.get("reporting")
+    extra_data = body.get("extra_ctx", {})
+    is_final = body.get("is_final", False)
+    output_format = body.get("output_format", "flatten_pdf")
+    flatten = body.get("flatten", True)
+    user_id = get_jwt_identity()
 
-    # 解析课程（可选，最多 3 门）
-    course_ids: List[int] = body.get("course_ids", [])[:3]
-    courses: List[Course] = []
-    if course_ids:
-        courses = Course.query.filter(Course.id.in_(course_ids)).all()
+    if tpl_type == TemplateType.REPORT_CARD:
+        scs = StudentCourse.query.filter_by(student_id=student.id).all()
+        return send_file(DocumentService.generate_report_card_pdf(student, scs, reporting, user_id, extra_data))
 
-    # ---------- 构造 context ----------
-    ctx = build_student_context(student)
+    if tpl_type in (TemplateType.TRANSCRIPT, TemplateType.FINAL_TRANSCRIPT):
+        scs = StudentCourse.query.filter_by(student_id=student.id).all()
+        return send_file(DocumentService.generate_transcript_pdf(student, scs, is_final, user_id, extra_data))
 
-    # Welcome Letter 需自动生成账号密码
     if tpl_type == TemplateType.WELCOME_LETTER:
-        ctx.update(build_login_context(student))
+        return send_file(DocumentService.generate_welcome_letter(student, courses, user_id))
 
-    if courses:
-        ctx.update(build_course_list_context(courses))
+    if tpl_type == TemplateType.LETTER_OF_ENROLMENT:
+        return send_file(DocumentService.generate_letter_of_enrolment(student, user_id))
 
-    # 用户自定义额外字段
-    ctx.update(body.get("extra_ctx", {}))
+    if tpl_type == TemplateType.LETTER_OF_ACCEPTANCE:
+        return send_file(DocumentService.generate_letter_of_acceptance(student, user_id))
 
-    # ---------- 调用 Service ----------
-    file_path = DocumentService.generate(tpl_type, ctx, user_id=get_jwt_identity())
-    return send_file(file_path, as_attachment=True)
+    if tpl_type == TemplateType.PREDICTED_GRADES:
+        return send_file(DocumentService.generate_enrollment_with_predicted(student, courses, predicted_map, user_id))
+
+    return jsonify(code=400, message="暂不支持该类型生成")
 
 
-# ---------------- 批量生成 ----------------
 @bp.route("/<template_type>/generate/batch", methods=["POST"])
 @jwt_required()
 def generate_batch(template_type: str):
-    """
-    批量为多个学生生成同一模板。
-    JSON 体：
-    {
-        "student_ids": [1,2,3],
-        "extra_ctx": {...},
-        "course_ids": [...],          # 可选，Welcome Letter 时最多传 3
-        "zip_name": "welcome_batch"   # 可选
-    }
-    """
     tpl_type = _parse_template_type(template_type)
     if not tpl_type:
         return jsonify(code=400, message="无效的 template_type"), 400
 
     body = request.get_json() or {}
-    student_ids: List[int] = body.get("student_ids", [])
+    student_ids = body.get("student_ids", [])
     if not student_ids:
         return jsonify(code=400, message="student_ids 不能为空"), 400
 
     students = Student.query.filter(Student.id.in_(student_ids)).all()
-    if len(students) != len(student_ids):
-        return jsonify(code=404, message="部分 student_id 不存在"), 404
+    course_ids = body.get("course_ids", [])
+    courses = Course.query.filter(Course.id.in_(course_ids)).all() if course_ids else []
+    predicted_map = body.get("predicted_map", {})
+    extra_data = body.get("extra_ctx", {})
+    is_final = body.get("is_final", False)
+    reporting = body.get("reporting")
+    output_format = body.get("output_format", "flatten_pdf")
+    flatten = body.get("flatten", True)
+    user_id = get_jwt_identity()
 
-    course_ids: List[int] = body.get("course_ids", [])[:3]
-    courses: List[Course] = []
-    if course_ids:
-        courses = Course.query.filter(Course.id.in_(course_ids)).all()
-
-    extra_ctx = body.get("extra_ctx", {})
-    current_user = get_jwt_identity()
-
-    generated_paths: List[Path] = []
-    for stu in students:
-        ctx = build_student_context(stu)
-        if tpl_type == TemplateType.WELCOME_LETTER:
-            ctx.update(build_login_context(stu))
-        if courses:
-            ctx.update(build_course_list_context(courses))
-        ctx.update(extra_ctx)
-
-        generated_paths.append(DocumentService.generate(tpl_type, ctx, user_id=current_user))
-
-    # ------ 打包 ZIP 返回 ------
     zip_dir = Path("generated_docs") / "zip"
     zip_dir.mkdir(parents=True, exist_ok=True)
-    zip_name = body.get("zip_name") or f"{uuid.uuid4().hex}.zip"
-    zip_path = zip_dir / zip_name
+    zip_path = zip_dir / f"{uuid.uuid4().hex}.zip"
+
+    generated_paths = []
+    for stu in students:
+        if tpl_type == TemplateType.REPORT_CARD:
+            scs = StudentCourse.query.filter_by(student_id=stu.id).all()
+            path = DocumentService.generate_report_card_pdf(stu, scs, reporting, user_id, extra_data)
+        elif tpl_type in (TemplateType.TRANSCRIPT, TemplateType.FINAL_TRANSCRIPT):
+            scs = StudentCourse.query.filter_by(student_id=stu.id).all()
+            path = DocumentService.generate_transcript_pdf(stu, scs, is_final, user_id, extra_data)
+        elif tpl_type == TemplateType.WELCOME_LETTER:
+            path = DocumentService.generate_welcome_letter(stu, courses, user_id)
+        elif tpl_type == TemplateType.LETTER_OF_ENROLMENT:
+            path = DocumentService.generate_letter_of_enrolment(stu, user_id)
+        elif tpl_type == TemplateType.LETTER_OF_ACCEPTANCE:
+            path = DocumentService.generate_letter_of_acceptance(stu, user_id)
+        elif tpl_type == TemplateType.PREDICTED_GRADES:
+            path = DocumentService.generate_enrollment_with_predicted(stu, courses, predicted_map, user_id)
+        else:
+            continue
+        generated_paths.append(path)
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for p in generated_paths:

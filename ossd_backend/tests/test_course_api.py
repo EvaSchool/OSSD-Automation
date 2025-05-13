@@ -29,14 +29,16 @@ headers = {"Authorization": f"Bearer {access_token}"}
 print("✅ Login successful.")
 
 # === Step 2: Create a course ===
-test_course_code = "TEST102"
+test_course_code = "PLE"
+
+
 new_course = {
     "course_code": test_course_code,
-    "course_name": "Test Course",
-    "description": "This is a test course.",
-    "credit": 1.0,
-    "course_level": "11",
-    "is_compulsory": True
+    "course_name": "Equivalent Credits",
+    "description": "Equivalent Credits granted through PLAR or transcript evaluation",
+    "credit": 0.0,
+    "course_level": '11',
+    "is_compulsory": None
 }
 
 create_response = requests.post(BASE_URL + COURSES_ENDPOINT, json=new_course, headers=headers)
@@ -57,12 +59,14 @@ found = any(c['course_code'] == test_course_code for c in courses)
 print("✅ Course found by course_code." if found else "❌ Course not found by course_code.")
 
 # === Step 3b: Keyword fuzzy search ===
-params = {"keyword": "TEST"}
+params = {"keyword": "4u"}
 fuzzy_response = requests.get(BASE_URL + COURSES_ENDPOINT, headers=headers, params=params)
 debug_response("Fuzzy Search", fuzzy_response)
 fuzzy_courses = fuzzy_response.json().get("data", {}).get("list", [])
 fuzzy_found = any(test_course_code in c['course_code'] for c in fuzzy_courses)
 print("✅ Course found by keyword fuzzy search." if fuzzy_found else "❌ Course not found by keyword fuzzy search.")
+
+
 
 # === Step 4: Update course ===
 update_data = {
@@ -84,8 +88,9 @@ if courses:
     updated_course = courses[0]
     print(f"Updated course_level: {updated_course['course_level']}")
 
+
 # === Step 5: Delete course ===
-delete_data = {"course_codes": [test_course_code]}
+delete_data = {"course_codes": ["PLE"]}
 delete_response = requests.delete(BASE_URL + COURSES_ENDPOINT, json=delete_data, headers=headers)
 debug_response("Delete Course", delete_response)
 print("✅ Course deleted successfully." if delete_response.status_code == 200 else "❌ Failed to delete course.")

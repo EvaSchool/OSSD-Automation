@@ -29,7 +29,6 @@ def get_courses():
         elif keyword:
             query = query.filter(or_(
                 Course.course_code.ilike(f'%{keyword}%'),
-                Course.course_name.ilike(f'%{keyword}%')
             ))
 
         if course_levels:
