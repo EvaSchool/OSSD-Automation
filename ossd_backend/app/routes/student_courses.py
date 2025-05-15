@@ -7,6 +7,8 @@ from app import db
 from app.models import StudentCourse, Student, Course, CourseStatus, Month, OperationLog, Template
 from datetime import datetime
 from sqlalchemy import func
+from decimal import Decimal, InvalidOperation
+import pandas as pd
 
 bp = Blueprint('student_courses', __name__, url_prefix='/api/v1/student_courses')
 
@@ -97,7 +99,7 @@ def create_student_course():
     try:
         data = request.get_json()
         current_user_id = get_jwt_identity()
-        
+
         # 验证必填字段
         required_fields = ['student_id', 'course_code', 'start_year', 'start_month', 'start_day', 'status', 'is_compulsory', 'is_local']
         for field in required_fields:
@@ -107,8 +109,8 @@ def create_student_course():
         # 验证课程状态
         try:
             status = CourseStatus[data['status'].upper()]
-            if status not in [CourseStatus.IN_PROGRESS, CourseStatus.GRADUATED]:
-                return jsonify({'code': 400, 'message': 'New course status can only be IN_PROGRESS or GRADUATED'}), 400
+            if status not in [CourseStatus.IN_PROGRESS, CourseStatus.COMPLETED]:
+                return jsonify({'code': 400, 'message': 'New course status can only be IN_PROGRESS or COMPLETED'}), 400
         except KeyError:
             return jsonify({'code': 400, 'message': 'Invalid course status'}), 400
 
@@ -118,10 +120,22 @@ def create_student_course():
         except KeyError:
             return jsonify({'code': 400, 'message': 'Invalid month'}), 400
 
+        # 初始化 override_credit（默认 None）
+        override_credit = None
+        if 'override_credit' in data:
+            if status != CourseStatus.COMPLETED:
+                return jsonify({'code': 400, 'message': 'override_credit can only be set for COMPLETED courses'}), 400
+            try:
+                override_credit = Decimal(str(data['override_credit']))
+                if override_credit < 0 or override_credit > 4:
+                    raise ValueError
+            except (InvalidOperation, ValueError):
+                return jsonify({'code': 400, 'message': 'Invalid override_credit, must be a number between 0 and 4'}), 400
+
         # 如果是已修课程，验证成绩和完成日期
-        if status == CourseStatus.GRADUATED:
+        if status == CourseStatus.COMPLETED:
             if not all(key in data for key in ['midterm_grade', 'final_grade', 'completion_date']):
-                return jsonify({'code': 400, 'message': 'Graduated course must provide midterm grade, final grade and completion date'}), 400
+                return jsonify({'code': 400, 'message': 'Completed course must provide midterm grade, final grade and completion date'}), 400
 
         # 创建学生课程记录
         sc = StudentCourse(
@@ -132,11 +146,12 @@ def create_student_course():
             start_day=data['start_day'],
             status=status,
             is_compulsory=data['is_compulsory'],
-            is_local=data['is_local']
+            is_local=data['is_local'],
+            override_credit=override_credit  # ✅ 设置进模型
         )
 
         # 如果是已修课程，设置成绩和完成日期
-        if status == CourseStatus.GRADUATED:
+        if status == CourseStatus.COMPLETED:
             sc.midterm_grade = data['midterm_grade']
             sc.final_grade = data['final_grade']
             sc.completion_date = datetime.strptime(data['completion_date'], '%Y-%m-%d').date()
@@ -166,6 +181,7 @@ def create_student_course():
     except Exception as e:
         db.session.rollback()
         return jsonify({'code': 500, 'message': f'Failed to add course: {str(e)}'}), 500
+
 
 # --------------------------------------------------
 # PUT /student_courses/<int:id>/grades
@@ -406,3 +422,113 @@ def withdraw_student(student_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'code': 500, 'message': f'Failed to withdraw student: {str(e)}'}), 500
+
+@bp.route('/import', methods=['POST'])
+@jwt_required()
+def import_student_courses():
+    """上传 CSV / Excel 进行批量添加或更新学生课程"""
+    file = request.files.get('file')
+    if not file:
+        return jsonify({'code': 400, 'message': 'No file uploaded'}), 400
+
+    # 尝试读取文件
+    try:
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(file)
+        elif file.filename.endswith('.xlsx'):
+            df = pd.read_excel(file)
+        else:
+            return jsonify({'code': 400, 'message': 'Unsupported file format'}), 400
+    except Exception as e:
+        return jsonify({'code': 400, 'message': f'File parsing failed: {str(e)}'}), 400
+
+    df.columns = [str(col).strip() for col in df.columns]
+
+    status_map = {
+        "REGISTERED": CourseStatus.IN_PROGRESS,
+        "IN_PROGRESS": CourseStatus.IN_PROGRESS,
+        "COMPLETED": CourseStatus.COMPLETED,
+        "GRADUATED": CourseStatus.COMPLETED,
+    }
+    month_map = {m.name: m for m in Month}
+
+    results = []
+    name_map = {
+        f"{s.last_name.strip()} {s.first_name.strip()}": s.id
+        for s in Student.query.all()
+    }
+
+    for i, row in df.iterrows():
+        try:
+            full_name = str(row["学生姓名"]).strip()
+            course_code = str(row["课程代码"]).strip()
+
+            if full_name not in name_map:
+                results.append({"row": i+2, "name": full_name, "course": course_code, "result": "error", "message": "Student not found"})
+                continue
+
+            student_id = name_map[full_name]
+            existing = StudentCourse.query.filter_by(student_id=student_id, course_code=course_code).first()
+            status = status_map[str(row["状态"]).strip().upper()]
+            start_year = int(row["起始年"])
+            start_month = month_map[str(row["起始月"]).strip().upper()]
+            start_day = int(row["起始日"])
+            is_compulsory = bool(int(row["Is Compulsory （1 必修; 0 非必修)"]))
+            is_local = bool(int(row["Is Local(1代表是本校修的学分，0代表不是)"]))
+
+            override_credit = None
+            if "Override Credit（重修的时候填写）" in row and pd.notna(row["Override Credit（重修的时候填写）"]):
+                override_credit = Decimal(str(row["Override Credit（重修的时候填写）"]))
+                if override_credit < 0 or override_credit > 4:
+                    raise ValueError("Invalid override_credit")
+
+            if existing:
+                if existing.status == CourseStatus.IN_PROGRESS:
+                    changed = False
+                    if pd.notna(row["Midterm"]):
+                        existing.midterm_grade = Decimal(row["Midterm"])
+                        changed = True
+                    if pd.notna(row["Final"]):
+                        existing.final_grade = Decimal(row["Final"])
+                        changed = True
+                    if changed:
+                        results.append({"row": i+2, "name": full_name, "course": course_code, "result": "updated"})
+                    else:
+                        results.append({"row": i+2, "name": full_name, "course": course_code, "result": "skipped", "message": "Already exists"})
+                else:
+                    results.append({"row": i+2, "name": full_name, "course": course_code, "result": "skipped", "message": "Already exists"})
+                continue
+
+            # 新建课程
+            sc = StudentCourse(
+                student_id=student_id,
+                course_code=course_code,
+                start_year=start_year,
+                start_month=start_month,
+                start_day=start_day,
+                status=status,
+                is_compulsory=is_compulsory,
+                is_local=is_local,
+                override_credit=override_credit,
+            )
+
+            if status == CourseStatus.COMPLETED:
+                sc.midterm_grade = Decimal(row["Midterm"])
+                sc.final_grade = Decimal(row["Final"])
+                sc.completion_date = pd.to_datetime(
+                    row["Completion Date（这个日期是和OST上出现的日期一致）"]
+                ).date()
+                sc.report_card_date = pd.to_datetime(
+                    row["Report Card Date（可以直接参照completion date）"]
+                ).date()
+
+            db.session.add(sc)
+            results.append({"row": i+2, "name": full_name, "course": course_code, "result": "created"})
+
+        except Exception as e:
+            results.append({"row": i+2, "name": full_name if 'full_name' in locals() else '',
+                            "course": course_code if 'course_code' in locals() else '',
+                            "result": "error", "message": str(e)})
+
+    db.session.commit()
+    return jsonify({"code": 200, "message": "Import finished", "results": results}), 200

@@ -1,5 +1,5 @@
 """
-集中管理一切“占位符 → 值”的拼装逻辑
+集中管理一切"占位符 → 值"的拼装逻辑
 """
 
 from __future__ import annotations
@@ -158,6 +158,26 @@ def generate_comment(levels: dict[str, str]) -> str:
     return " ".join(segments)
 
 # ──────────────── Report Card ────────────────
+def get_semester_from_date(date: datetime = None) -> str:
+    """
+    根据日期自动判断学期
+    9-12月：第一学期 (1)
+    1-3月：第二学期 (2)
+    4-6月：第三学期 (3)
+    """
+    if date is None:
+        date = datetime.now()
+    
+    month = date.month
+    if 9 <= month <= 12:
+        return "1"
+    elif 1 <= month <= 3:
+        return "2"
+    elif 4 <= month <= 6:
+        return "3"
+    else:
+        return "3"  # 7-8月默认返回第三学期
+
 def build_report_card_context(
     student: Student,
     student_courses: List[StudentCourse],
@@ -165,13 +185,21 @@ def build_report_card_context(
 ) -> Dict[str, Any]:
     """
     构建用于 Report Card 的渲染上下文，结合数据库与手动填写数据。
+    如果课程有期末成绩，则使用期末成绩单；否则使用期中成绩单。
     """
     base = build_student_context(student)
 
+    # 自动判断学期（如果手动指定了则使用手动指定的值）
+    semester = extra_data.get("semester")
+    if semester is None:
+        semester = get_semester_from_date()
+
     # 学校与顶部字段
     base.update({
-        "semester": extra_data.get("semester", "1"),
-        "reporting": extra_data.get("reporting", "1"),
+        "semester": semester,
+        "name": f"{student.last_name}, {student.first_name}",
+        "OEN": student.oen,
+        "Grade": student.grade.value if hasattr(student, "grade") else "",
         "homeroom": extra_data.get("homeroom", "N/A"),
         "principal": "Eric Tran",
         "schoolName": "Emerald Valley Academy",
@@ -184,11 +212,19 @@ def build_report_card_context(
     })
 
     rows = []
-    reporting_period = extra_data.get("reporting", "1")
+    # 获取每个课程的 reporting 状态（如果手动指定了则使用手动指定的值）
+    course_reporting = extra_data.get("course_reporting", {})
 
     for sc in student_courses:
         course = sc.course
         cid = str(sc.id)
+        
+        # 如果手动指定了该课程的 reporting 状态，则使用手动指定的值
+        # 否则根据是否有期末成绩自动判断
+        if cid in course_reporting:
+            reporting_period = course_reporting[cid]
+        else:
+            reporting_period = "2" if sc.final_grade is not None else "1"
 
         mid_score = sc.midterm_grade or 0
         final_score = sc.final_grade or mid_score
@@ -196,7 +232,7 @@ def build_report_card_context(
         mid_skills = infer_learning_skills(mid_score)
         final_skills = infer_learning_skills(final_score)
 
-        # 根据 reporting 生成不同的评语
+        # 根据该课程的 reporting 生成不同的评语
         if reporting_period == "1":
             comment = generate_comment(mid_skills)
         else:
@@ -227,12 +263,12 @@ def build_report_card_context(
             "finalS": extra_data.get(f"{cid}_finalS", final_skills["S"]),
             # 出勤
             "midClassMissed": extra_data.get(f"{cid}_midClassMissed", 0),
-            "midTotalClass": extra_data.get(f"{cid}_midTotalClass", 0),
+            "midTotalClass": extra_data.get(f"{cid}_midTotalClass", ""),
             "midTimesLate": extra_data.get(f"{cid}_midTimesLate", 0),
             "finalClassMissed": extra_data.get(f"{cid}_finalClassMissed", 0),
-            "finalTotalClass": extra_data.get(f"{cid}_finalTotalClass", 0),
+            "finalTotalClass": extra_data.get(f"{cid}_finalTotalClass", ""),
             "finalTimesLate": extra_data.get(f"{cid}_finalTimesLate", 0),
-            # 留评语（优先使用手动填写）
+            # 评语（优先使用手动填写）
             "comment": extra_data.get(f"{cid}_comment", comment),
         })
 

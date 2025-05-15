@@ -7,13 +7,14 @@ import uuid
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Literal
-
 from docxtpl import DocxTemplate
 from flask import current_app
 from app import db
 from app.models import Template as TemplateModel, TemplateType, OperationLog
 from . import context_builder as ctxb
 from .context_builder import build_transcript_context, build_report_card_context
+from app.utils.file_path import get_generated_file_path
+
 
 OUTPUT_ROOT = Path("ossd_backend/generated_docs")
 
@@ -35,9 +36,12 @@ class DocumentService:
         doc = DocxTemplate(str(tpl_path))
         doc.render(context)
 
-        out_dir = OUTPUT_ROOT / tpl_type.value
-        out_dir.mkdir(parents=True, exist_ok=True)
-        docx_path = out_dir / f"{uuid.uuid4().hex}.docx"
+        docx_path = get_generated_file_path(
+            context.get("STUDENT_LASTNAME", "unknown"),
+            context.get("STUDENT_FIRSTNAME", "unknown"),
+            tpl_type.value,
+            ".docx"
+        )
         doc.save(docx_path)
 
         final_path = docx_path
@@ -90,7 +94,12 @@ class DocumentService:
     def _fill_pdf_template(pdf_path: Path, context: dict[str, str]) -> Path:
         from PyPDF2 import PdfReader, PdfWriter
 
-        output_path = pdf_path.with_stem(pdf_path.stem + "_filled")
+        output_path = get_generated_file_path(
+            context.get("STUDENT_LASTNAME", "unknown"),
+            context.get("STUDENT_FIRSTNAME", "unknown"),
+            "pdf_form_filled",
+            ".pdf"
+        )
         reader = PdfReader(str(pdf_path))
         writer = PdfWriter()
 
@@ -181,8 +190,26 @@ class DocumentService:
         return cls.generate_pdf_form_template(tpl_type, ctx, user_id, flatten=True)
 
     @classmethod
-    def generate_report_card_pdf(cls, student, student_courses, reporting: str, user_id: int, extra_data: dict = {}):
-        ctx = build_report_card_context(student, student_courses, extra_data | {"reporting": reporting})
+    def generate_report_card_pdf(cls, student, student_courses, reporting: str | Dict[str, str], user_id: int, extra_data: dict = {}):
+        """
+        生成成绩单 PDF
+        :param student: 学生对象
+        :param student_courses: 学生课程列表
+        :param reporting: 可以是字符串（全局 reporting）或字典（每个课程的 reporting）
+        :param user_id: 用户 ID
+        :param extra_data: 额外数据
+        """
+        # 如果 reporting 是字符串，转换为字典格式
+        if isinstance(reporting, str):
+            course_reporting = {str(sc.id): reporting for sc in student_courses}
+        else:
+            course_reporting = reporting
+
+        ctx = build_report_card_context(
+            student, 
+            student_courses, 
+            extra_data | {"course_reporting": course_reporting}
+        )
         return cls.generate_pdf_form_template(TemplateType.REPORT_CARD, ctx, user_id, flatten=True)
 
     # ─────────────────────────────

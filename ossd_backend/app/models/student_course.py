@@ -5,7 +5,7 @@ from app.models.student import Month
 
 class CourseStatus(Enum):
     IN_PROGRESS = 'IN_PROGRESS'
-    GRADUATED = 'GRADUATED'
+    COMPLETED = 'COMPLETED'
     WITHDRAWN = 'WITHDRAWN'
 
 class StudentCourse(db.Model):

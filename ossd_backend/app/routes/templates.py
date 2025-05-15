@@ -5,6 +5,10 @@ import uuid
 import zipfile
 from pathlib import Path
 from typing import List
+from app.utils.file_path import get_generated_file_path
+from app.utils.file_path import GENERATED_ROOT
+from datetime import datetime
+import uuid
 
 from flask import (
     Blueprint,
@@ -194,9 +198,10 @@ def generate_batch(template_type: str):
     flatten = body.get("flatten", True)
     user_id = get_jwt_identity()
 
-    zip_dir = Path("generated_docs") / "zip"
+    now = datetime.now(datetime.UTC)
+    zip_dir = GENERATED_ROOT / "batch_zip" / str(now.year)
     zip_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = zip_dir / f"{uuid.uuid4().hex}.zip"
+    zip_path = zip_dir / f"batch_{now.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}.zip"
 
     generated_paths = []
     for stu in students:
@@ -218,6 +223,72 @@ def generate_batch(template_type: str):
             continue
         generated_paths.append(path)
 
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in generated_paths:
+            zf.write(p, arcname=p.name)
+
+    return send_file(zip_path, as_attachment=True)
+
+
+@bp.route("/generate/student/<int:student_id>/packages", methods=["POST"])
+@jwt_required()
+def generate_student_packages(student_id: int):
+    """为一个学生生成多个文件并打包"""
+    student = Student.query.get_or_404(student_id)
+    body = request.get_json() or {}
+    template_types = body.get("template_types", [])
+    if not template_types:
+        return jsonify(code=400, message="template_types 不能为空"), 400
+
+    # 获取其他参数
+    course_ids = body.get("course_ids", [])
+    courses = Course.query.filter(Course.id.in_(course_ids)).all() if course_ids else []
+    predicted_map = body.get("predicted_map", {})
+    reporting = body.get("reporting")
+    extra_data = body.get("extra_ctx", {})
+    is_final = body.get("is_final", False)
+    user_id = get_jwt_identity()
+
+    zip_path = get_generated_file_path(
+        student.last_name,
+        student.first_name,
+        "package",
+        ".zip"
+    )
+
+    generated_paths = []
+    for tpl_type in template_types:
+        try:
+            tpl_enum = _parse_template_type(tpl_type)
+            if not tpl_enum:
+                continue
+
+            if tpl_enum == TemplateType.REPORT_CARD:
+                scs = StudentCourse.query.filter_by(student_id=student.id).all()
+                path = DocumentService.generate_report_card_pdf(student, scs, reporting, user_id, extra_data)
+            elif tpl_enum in (TemplateType.TRANSCRIPT, TemplateType.FINAL_TRANSCRIPT):
+                scs = StudentCourse.query.filter_by(student_id=student.id).all()
+                path = DocumentService.generate_transcript_pdf(student, scs, is_final, user_id, extra_data)
+            elif tpl_enum == TemplateType.WELCOME_LETTER:
+                path = DocumentService.generate_welcome_letter(student, courses, user_id)
+            elif tpl_enum == TemplateType.LETTER_OF_ENROLMENT:
+                path = DocumentService.generate_letter_of_enrolment(student, user_id)
+            elif tpl_enum == TemplateType.LETTER_OF_ACCEPTANCE:
+                path = DocumentService.generate_letter_of_acceptance(student, user_id)
+            elif tpl_enum == TemplateType.PREDICTED_GRADES:
+                path = DocumentService.generate_enrollment_with_predicted(student, courses, predicted_map, user_id)
+            else:
+                continue
+
+            generated_paths.append(path)
+        except Exception as e:
+            current_app.logger.error(f"生成文件失败 {tpl_type}: {str(e)}")
+            continue
+
+    if not generated_paths:
+        return jsonify(code=400, message="没有成功生成任何文件"), 400
+
+    # 打包文件
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for p in generated_paths:
             zf.write(p, arcname=p.name)
