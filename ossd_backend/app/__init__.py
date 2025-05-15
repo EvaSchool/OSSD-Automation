@@ -57,6 +57,11 @@ def create_app(config_name='default'):
     app.register_blueprint(operation_logs.bp, url_prefix='/api/v1/operation-logs')
     print(f"  ✅ 已注册操作日志蓝图: /api/v1/operation-logs")
 
+    from app.routes import document_jobs
+    app.register_blueprint(document_jobs.bp, url_prefix='/api/v1/document_jobs')
+    print(f"  ✅ 已注册任务蓝图: /api/v1/document_jobs")
+
+
     '''
     from app.routes import generate
     app.register_blueprint(generate.bp, url_prefix='/api/v1/generate')

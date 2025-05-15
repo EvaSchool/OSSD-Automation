@@ -9,7 +9,7 @@ from app.utils.file_path import get_generated_file_path
 from app.utils.file_path import GENERATED_ROOT
 from datetime import datetime
 import uuid
-
+from app.models.document_job import DocumentJob, DocumentJobStatus
 from flask import (
     Blueprint,
     current_app,
@@ -152,27 +152,48 @@ def generate_single(template_type: str, student_id: int):
     flatten = body.get("flatten", True)
     user_id = get_jwt_identity()
 
-    if tpl_type == TemplateType.REPORT_CARD:
-        scs = StudentCourse.query.filter_by(student_id=student.id).all()
-        return send_file(DocumentService.generate_report_card_pdf(student, scs, reporting, user_id, extra_data))
+    # 创建文档任务
+    job = DocumentJob(
+        student_id=student.student_id,
+        template_type=tpl_type.name,
+        file_path="",  # 先占位
+        status=DocumentJobStatus.PENDING,
+    )
+    db.session.add(job)
+    db.session.commit()
 
-    if tpl_type in (TemplateType.TRANSCRIPT, TemplateType.FINAL_TRANSCRIPT):
-        scs = StudentCourse.query.filter_by(student_id=student.id).all()
-        return send_file(DocumentService.generate_transcript_pdf(student, scs, is_final, user_id, extra_data))
+    try:
+        if tpl_type == TemplateType.REPORT_CARD:
+            scs = StudentCourse.query.filter_by(student_id=student.student_id).all()
+            path = DocumentService.generate_report_card_pdf(student, scs, reporting, user_id, extra_data)
+        elif tpl_type in (TemplateType.TRANSCRIPT, TemplateType.FINAL_TRANSCRIPT):
+            scs = StudentCourse.query.filter_by(student_id=student.student_id).all()
+            path = DocumentService.generate_transcript_pdf(student, scs, is_final, user_id, extra_data)
+        elif tpl_type == TemplateType.WELCOME_LETTER:
+            path = DocumentService.generate_welcome_letter(student, courses, user_id)
+        elif tpl_type == TemplateType.LETTER_OF_ENROLMENT:
+            path = DocumentService.generate_letter_of_enrolment(student, user_id)
+        elif tpl_type == TemplateType.LETTER_OF_ACCEPTANCE:
+            path = DocumentService.generate_letter_of_acceptance(student, user_id)
+        elif tpl_type == TemplateType.PREDICTED_GRADES:
+            path = DocumentService.generate_enrollment_with_predicted(student, courses, predicted_map, user_id)
+        else:
+            return jsonify(code=400, message="暂不支持该类型生成")
 
-    if tpl_type == TemplateType.WELCOME_LETTER:
-        return send_file(DocumentService.generate_welcome_letter(student, courses, user_id))
+        # 成功更新 job 状态
+        job.status = DocumentJobStatus.SUCCESS
+        job.file_path = str(path)
+        job.completed_at = datetime.utcnow()
+        db.session.commit()
 
-    if tpl_type == TemplateType.LETTER_OF_ENROLMENT:
-        return send_file(DocumentService.generate_letter_of_enrolment(student, user_id))
+        return send_file(path, as_attachment=True)
 
-    if tpl_type == TemplateType.LETTER_OF_ACCEPTANCE:
-        return send_file(DocumentService.generate_letter_of_acceptance(student, user_id))
-
-    if tpl_type == TemplateType.PREDICTED_GRADES:
-        return send_file(DocumentService.generate_enrollment_with_predicted(student, courses, predicted_map, user_id))
-
-    return jsonify(code=400, message="暂不支持该类型生成")
+    except Exception as e:
+        job.status = DocumentJobStatus.FAILED
+        job.error_message = str(e)
+        job.completed_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify(code=500, message=f"生成失败: {str(e)}")
 
 
 @bp.route("/<template_type>/generate/batch", methods=["POST"])
@@ -233,14 +254,12 @@ def generate_batch(template_type: str):
 @bp.route("/generate/student/<int:student_id>/packages", methods=["POST"])
 @jwt_required()
 def generate_student_packages(student_id: int):
-    """为一个学生生成多个文件并打包"""
     student = Student.query.get_or_404(student_id)
     body = request.get_json() or {}
     template_types = body.get("template_types", [])
     if not template_types:
         return jsonify(code=400, message="template_types 不能为空"), 400
 
-    # 获取其他参数
     course_ids = body.get("course_ids", [])
     courses = Course.query.filter(Course.id.in_(course_ids)).all() if course_ids else []
     predicted_map = body.get("predicted_map", {})
@@ -249,48 +268,72 @@ def generate_student_packages(student_id: int):
     is_final = body.get("is_final", False)
     user_id = get_jwt_identity()
 
-    zip_path = get_generated_file_path(
-        student.last_name,
-        student.first_name,
-        "package",
-        ".zip"
+    # 创建 job 任务
+    from app.models.document_job import DocumentJob, DocumentJobStatus
+    job = DocumentJob(
+        student_id=student.student_id,
+        template_type="PACKAGE",
+        file_path="",
+        status=DocumentJobStatus.PENDING,
     )
+    db.session.add(job)
+    db.session.commit()
 
-    generated_paths = []
-    for tpl_type in template_types:
-        try:
-            tpl_enum = _parse_template_type(tpl_type)
-            if not tpl_enum:
+    try:
+        zip_path = get_generated_file_path(
+            student.last_name,
+            student.first_name,
+            "package",
+            ".zip"
+        )
+
+        generated_paths = []
+        for tpl_type in template_types:
+            try:
+                tpl_enum = _parse_template_type(tpl_type)
+                if not tpl_enum:
+                    continue
+
+                if tpl_enum == TemplateType.REPORT_CARD:
+                    scs = StudentCourse.query.filter_by(student_id=student.student_id).all()
+                    path = DocumentService.generate_report_card_pdf(student, scs, reporting, user_id, extra_data)
+                elif tpl_enum in (TemplateType.TRANSCRIPT, TemplateType.FINAL_TRANSCRIPT):
+                    scs = StudentCourse.query.filter_by(student_id=student.student_id).all()
+                    path = DocumentService.generate_transcript_pdf(student, scs, is_final, user_id, extra_data)
+                elif tpl_enum == TemplateType.WELCOME_LETTER:
+                    path = DocumentService.generate_welcome_letter(student, courses, user_id)
+                elif tpl_enum == TemplateType.LETTER_OF_ENROLMENT:
+                    path = DocumentService.generate_letter_of_enrolment(student, user_id)
+                elif tpl_enum == TemplateType.LETTER_OF_ACCEPTANCE:
+                    path = DocumentService.generate_letter_of_acceptance(student, user_id)
+                elif tpl_enum == TemplateType.PREDICTED_GRADES:
+                    path = DocumentService.generate_enrollment_with_predicted(student, courses, predicted_map, user_id)
+                else:
+                    continue
+
+                generated_paths.append(path)
+            except Exception as e:
+                current_app.logger.error(f"生成文件失败 {tpl_type}: {str(e)}")
                 continue
 
-            if tpl_enum == TemplateType.REPORT_CARD:
-                scs = StudentCourse.query.filter_by(student_id=student.id).all()
-                path = DocumentService.generate_report_card_pdf(student, scs, reporting, user_id, extra_data)
-            elif tpl_enum in (TemplateType.TRANSCRIPT, TemplateType.FINAL_TRANSCRIPT):
-                scs = StudentCourse.query.filter_by(student_id=student.id).all()
-                path = DocumentService.generate_transcript_pdf(student, scs, is_final, user_id, extra_data)
-            elif tpl_enum == TemplateType.WELCOME_LETTER:
-                path = DocumentService.generate_welcome_letter(student, courses, user_id)
-            elif tpl_enum == TemplateType.LETTER_OF_ENROLMENT:
-                path = DocumentService.generate_letter_of_enrolment(student, user_id)
-            elif tpl_enum == TemplateType.LETTER_OF_ACCEPTANCE:
-                path = DocumentService.generate_letter_of_acceptance(student, user_id)
-            elif tpl_enum == TemplateType.PREDICTED_GRADES:
-                path = DocumentService.generate_enrollment_with_predicted(student, courses, predicted_map, user_id)
-            else:
-                continue
+        if not generated_paths:
+            raise RuntimeError("所有文件生成失败")
 
-            generated_paths.append(path)
-        except Exception as e:
-            current_app.logger.error(f"生成文件失败 {tpl_type}: {str(e)}")
-            continue
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in generated_paths:
+                zf.write(p, arcname=p.name)
 
-    if not generated_paths:
-        return jsonify(code=400, message="没有成功生成任何文件"), 400
+        job.status = DocumentJobStatus.SUCCESS
+        job.file_path = str(zip_path)
+        job.completed_at = datetime.utcnow()
+        db.session.commit()
 
-    # 打包文件
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for p in generated_paths:
-            zf.write(p, arcname=p.name)
+        return send_file(zip_path, as_attachment=True)
 
-    return send_file(zip_path, as_attachment=True)
+    except Exception as e:
+        job.status = DocumentJobStatus.FAILED
+        job.error_message = str(e)
+        job.completed_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify(code=500, message=f"生成失败: {str(e)}")
+
