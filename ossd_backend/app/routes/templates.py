@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List
 from app.utils.file_path import get_generated_file_path
 from app.utils.file_path import GENERATED_ROOT
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 from app.models.document_job import DocumentJob, DocumentJobStatus
 from flask import (
@@ -136,14 +136,20 @@ def _parse_template_type(raw: str) -> TemplateType | None:
 @bp.route("/<template_type>/generate/student/<int:student_id>", methods=["POST"])
 @jwt_required()
 def generate_single(template_type: str, student_id: int):
+    print(f"[调试] 开始生成文档: template_type={template_type}, student_id={student_id}")
     tpl_type = _parse_template_type(template_type)
     if not tpl_type:
+        print(f"[调试] 无效的模板类型: {template_type}")
         return jsonify(code=400, message="无效的 template_type"), 400
 
     student = Student.query.get_or_404(student_id)
+    print(f"[调试] 找到学生: {student.first_name} {student.last_name}")
     body = request.get_json() or {}
     course_ids = body.get("course_ids", [])
     courses = Course.query.filter(Course.id.in_(course_ids)).all() if course_ids else []
+    course_codes = body.get("course_codes", [])
+    if course_codes:
+        courses = Course.query.filter(Course.course_code.in_(course_codes)).all()
     predicted_map = body.get("predicted_map", {})
     reporting = body.get("reporting")
     extra_data = body.get("extra_ctx", {})
@@ -165,9 +171,11 @@ def generate_single(template_type: str, student_id: int):
     try:
         if tpl_type == TemplateType.REPORT_CARD:
             scs = StudentCourse.query.filter_by(student_id=student.student_id).all()
+            print(f"[调试] 找到学生课程: {len(scs)} 个")
             path = DocumentService.generate_report_card_pdf(student, scs, reporting, user_id, extra_data)
         elif tpl_type in (TemplateType.TRANSCRIPT, TemplateType.FINAL_TRANSCRIPT):
             scs = StudentCourse.query.filter_by(student_id=student.student_id).all()
+            print(f"[调试] 找到学生课程: {len(scs)} 个")
             path = DocumentService.generate_transcript_pdf(student, scs, is_final, user_id, extra_data)
         elif tpl_type == TemplateType.WELCOME_LETTER:
             path = DocumentService.generate_welcome_letter(student, courses, user_id)
@@ -178,20 +186,21 @@ def generate_single(template_type: str, student_id: int):
         elif tpl_type == TemplateType.PREDICTED_GRADES:
             path = DocumentService.generate_enrollment_with_predicted(student, courses, predicted_map, user_id)
         else:
+            print(f"[调试] 不支持的模板类型: {tpl_type}")
             return jsonify(code=400, message="暂不支持该类型生成")
 
-        # 成功更新 job 状态
         job.status = DocumentJobStatus.SUCCESS
         job.file_path = str(path)
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         db.session.commit()
 
         return send_file(path, as_attachment=True)
 
     except Exception as e:
+        print(f"[调试] 文档生成失败: {str(e)}")
         job.status = DocumentJobStatus.FAILED
         job.error_message = str(e)
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         db.session.commit()
         return jsonify(code=500, message=f"生成失败: {str(e)}")
 
@@ -219,7 +228,7 @@ def generate_batch(template_type: str):
     flatten = body.get("flatten", True)
     user_id = get_jwt_identity()
 
-    now = datetime.now(datetime.UTC)
+    now = datetime.now(timezone.utc)
     zip_dir = GENERATED_ROOT / "batch_zip" / str(now.year)
     zip_dir.mkdir(parents=True, exist_ok=True)
     zip_path = zip_dir / f"batch_{now.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}.zip"
@@ -325,7 +334,7 @@ def generate_student_packages(student_id: int):
 
         job.status = DocumentJobStatus.SUCCESS
         job.file_path = str(zip_path)
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         db.session.commit()
 
         return send_file(zip_path, as_attachment=True)
@@ -333,7 +342,7 @@ def generate_student_packages(student_id: int):
     except Exception as e:
         job.status = DocumentJobStatus.FAILED
         job.error_message = str(e)
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         db.session.commit()
         return jsonify(code=500, message=f"生成失败: {str(e)}")
 

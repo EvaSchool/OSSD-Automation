@@ -426,109 +426,133 @@ def withdraw_student(student_id):
 @bp.route('/import', methods=['POST'])
 @jwt_required()
 def import_student_courses():
-    """上传 CSV / Excel 进行批量添加或更新学生课程"""
-    file = request.files.get('file')
-    if not file:
-        return jsonify({'code': 400, 'message': 'No file uploaded'}), 400
+    """导入学生课程数据"""
+    if 'file' not in request.files:
+        return jsonify(code=400, message="未上传文件"), 400
+    
+    file = request.files['file']
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        return jsonify(code=400, message="请上传Excel文件"), 400
 
-    # 尝试读取文件
     try:
-        if file.filename.endswith('.csv'):
-            df = pd.read_csv(file)
-        elif file.filename.endswith('.xlsx'):
-            df = pd.read_excel(file)
-        else:
-            return jsonify({'code': 400, 'message': 'Unsupported file format'}), 400
-    except Exception as e:
-        return jsonify({'code': 400, 'message': f'File parsing failed: {str(e)}'}), 400
+        # 读取Excel文件
+        df = pd.read_excel(file)
+        
+        # 验证必要的列是否存在
+        required_columns = ['学生姓名', 'OEN', '课程代码', '状态', '起始年', '起始月', '起始日', 
+                          'Midterm', 'Final', 'Completion Date', 'Report Card Date', 
+                          'Is Compulsory', 'Is Local']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            return jsonify(code=400, message=f"缺少必要的列: {', '.join(missing_columns)}"), 400
 
-    df.columns = [str(col).strip() for col in df.columns]
+        success_count = 0
+        error_records = []
+        
+        for index, row in df.iterrows():
+            try:
+                # 查找学生
+                student = Student.query.filter_by(OEN=row['OEN'].replace('-', '')).first()
+                if not student:
+                    error_records.append(f"行 {index + 2}: 未找到OEN为 {row['OEN']} 的学生")
+                    continue
 
-    status_map = {
-        "REGISTERED": CourseStatus.IN_PROGRESS,
-        "IN_PROGRESS": CourseStatus.IN_PROGRESS,
-        "COMPLETED": CourseStatus.COMPLETED,
-        "GRADUATED": CourseStatus.COMPLETED,
-    }
-    month_map = {m.name: m for m in Month}
+                # 查找课程
+                course = Course.query.filter_by(course_code=row['课程代码']).first()
+                if not course:
+                    error_records.append(f"行 {index + 2}: 未找到课程代码为 {row['课程代码']} 的课程")
+                    continue
 
-    results = []
-    name_map = {
-        f"{s.last_name.strip()} {s.first_name.strip()}": s.id
-        for s in Student.query.all()
-    }
+                # 转换状态
+                status_map = {
+                    'COMPLETED': CourseStatus.GRADUATED,
+                    'IN_PROGRESS': CourseStatus.IN_PROGRESS,
+                    'WITHDRAWN': CourseStatus.WITHDRAWN
+                }
+                status = status_map.get(row['状态'])
+                if not status:
+                    error_records.append(f"行 {index + 2}: 无效的状态值 {row['状态']}")
+                    continue
 
-    for i, row in df.iterrows():
-        try:
-            full_name = str(row["学生姓名"]).strip()
-            course_code = str(row["课程代码"]).strip()
+                # 转换月份
+                month_map = {
+                    'JAN': Month.JANUARY, 'FEB': Month.FEBRUARY, 'MAR': Month.MARCH,
+                    'APR': Month.APRIL, 'MAY': Month.MAY, 'JUN': Month.JUNE,
+                    'JUL': Month.JULY, 'AUG': Month.AUGUST, 'SEP': Month.SEPTEMBER,
+                    'OCT': Month.OCTOBER, 'NOV': Month.NOVEMBER, 'DEC': Month.DECEMBER
+                }
+                start_month = month_map.get(row['起始月'])
+                if not start_month:
+                    error_records.append(f"行 {index + 2}: 无效的月份值 {row['起始月']}")
+                    continue
 
-            if full_name not in name_map:
-                results.append({"row": i+2, "name": full_name, "course": course_code, "result": "error", "message": "Student not found"})
-                continue
+                # 创建学生课程记录
+                student_course = StudentCourse(
+                    student_id=student.id,
+                    course_id=course.id,
+                    status=status,
+                    start_year=row['起始年'],
+                    start_month=start_month,
+                    start_day=row['起始日'],
+                    midterm_grade=row['Midterm'] if pd.notna(row['Midterm']) else None,
+                    final_grade=row['Final'] if pd.notna(row['Final']) else None,
+                    completion_date=pd.to_datetime(row['Completion Date']).date() if pd.notna(row['Completion Date']) else None,
+                    report_card_date=pd.to_datetime(row['Report Card Date']).date() if pd.notna(row['Report Card Date']) else None,
+                    is_compulsory=bool(row['Is Compulsory']),
+                    is_local=bool(row['Is Local']),
+                    override_credit=row['Override Credit'] if pd.notna(row['Override Credit']) else None
+                )
 
-            student_id = name_map[full_name]
-            existing = StudentCourse.query.filter_by(student_id=student_id, course_code=course_code).first()
-            status = status_map[str(row["状态"]).strip().upper()]
-            start_year = int(row["起始年"])
-            start_month = month_map[str(row["起始月"]).strip().upper()]
-            start_day = int(row["起始日"])
-            is_compulsory = bool(int(row["Is Compulsory （1 必修; 0 非必修)"]))
-            is_local = bool(int(row["Is Local(1代表是本校修的学分，0代表不是)"]))
+                # 检查是否已存在相同的记录
+                existing = StudentCourse.query.filter_by(
+                    student_id=student.id,
+                    course_id=course.id
+                ).first()
 
-            override_credit = None
-            if "Override Credit（重修的时候填写）" in row and pd.notna(row["Override Credit（重修的时候填写）"]):
-                override_credit = Decimal(str(row["Override Credit（重修的时候填写）"]))
-                if override_credit < 0 or override_credit > 4:
-                    raise ValueError("Invalid override_credit")
-
-            if existing:
-                if existing.status == CourseStatus.IN_PROGRESS:
-                    changed = False
-                    if pd.notna(row["Midterm"]):
-                        existing.midterm_grade = Decimal(row["Midterm"])
-                        changed = True
-                    if pd.notna(row["Final"]):
-                        existing.final_grade = Decimal(row["Final"])
-                        changed = True
-                    if changed:
-                        results.append({"row": i+2, "name": full_name, "course": course_code, "result": "updated"})
-                    else:
-                        results.append({"row": i+2, "name": full_name, "course": course_code, "result": "skipped", "message": "Already exists"})
+                if existing:
+                    # 更新现有记录
+                    for key, value in student_course.__dict__.items():
+                        if not key.startswith('_'):
+                            setattr(existing, key, value)
                 else:
-                    results.append({"row": i+2, "name": full_name, "course": course_code, "result": "skipped", "message": "Already exists"})
+                    # 添加新记录
+                    db.session.add(student_course)
+
+                success_count += 1
+
+            except Exception as e:
+                error_records.append(f"行 {index + 2}: {str(e)}")
                 continue
 
-            # 新建课程
-            sc = StudentCourse(
-                student_id=student_id,
-                course_code=course_code,
-                start_year=start_year,
-                start_month=start_month,
-                start_day=start_day,
-                status=status,
-                is_compulsory=is_compulsory,
-                is_local=is_local,
-                override_credit=override_credit,
-            )
+        # 提交事务
+        db.session.commit()
 
-            if status == CourseStatus.COMPLETED:
-                sc.midterm_grade = Decimal(row["Midterm"])
-                sc.final_grade = Decimal(row["Final"])
-                sc.completion_date = pd.to_datetime(
-                    row["Completion Date（这个日期是和OST上出现的日期一致）"]
-                ).date()
-                sc.report_card_date = pd.to_datetime(
-                    row["Report Card Date（可以直接参照completion date）"]
-                ).date()
+        # 记录操作日志
+        current_user_id = get_jwt_identity()
+        log = OperationLog(
+            user_id=current_user_id,
+            operation_type="IMPORT",
+            target_table="student_courses",
+            target_id="batch_import",
+            operation_details={
+                "success_count": success_count,
+                "error_count": len(error_records),
+                "error_records": error_records
+            }
+        )
+        db.session.add(log)
+        db.session.commit()
 
-            db.session.add(sc)
-            results.append({"row": i+2, "name": full_name, "course": course_code, "result": "created"})
+        return jsonify({
+            "code": 200,
+            "message": "导入完成",
+            "data": {
+                "success_count": success_count,
+                "error_count": len(error_records),
+                "error_records": error_records
+            }
+        })
 
-        except Exception as e:
-            results.append({"row": i+2, "name": full_name if 'full_name' in locals() else '',
-                            "course": course_code if 'course_code' in locals() else '',
-                            "result": "error", "message": str(e)})
-
-    db.session.commit()
-    return jsonify({"code": 200, "message": "Import finished", "results": results}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(code=500, message=f"导入失败: {str(e)}"), 500

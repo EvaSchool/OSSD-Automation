@@ -1,7 +1,7 @@
 # app/models/document_job.py
 
 from app import db
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -19,7 +19,7 @@ class DocumentJob(db.Model):
     template_type = db.Column(db.String(64), nullable=False)
     file_path = db.Column(db.String(255), nullable=False)
     status = db.Column(db.Enum(DocumentJobStatus), nullable=False, default=DocumentJobStatus.PENDING)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     completed_at = db.Column(db.DateTime, nullable=True)
     error_message = db.Column(db.Text, nullable=True)
 

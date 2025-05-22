@@ -4,7 +4,7 @@ from flask import Blueprint, request, jsonify
 from app import db
 from app.models.document_job import DocumentJob, DocumentJobStatus
 from flask_jwt_extended import jwt_required
-from datetime import datetime
+from datetime import datetime, timezone
 
 bp = Blueprint("document_jobs", __name__, url_prefix="/api/v1/document_jobs")
 
@@ -67,7 +67,7 @@ def retry_job(job_id):
         # 更新成功状态
         job.status = DocumentJobStatus.SUCCESS
         job.file_path = str(path)
-        job.completed_at = datetime.now(datetime.UTC)
+        job.completed_at = datetime.now(timezone.utc)
         job.error_message = None
         db.session.commit()
 
@@ -76,6 +76,6 @@ def retry_job(job_id):
     except Exception as e:
         job.status = DocumentJobStatus.FAILED
         job.error_message = str(e)
-        job.completed_at = datetime.now(datetime.UTC)
+        job.completed_at = datetime.now(timezone.utc)
         db.session.commit()
         return jsonify(code=500, message=f"重试失败: {str(e)}")

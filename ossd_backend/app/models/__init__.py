@@ -3,7 +3,7 @@ from .course import Course, CourseLevel
 from .student import Student, Month
 from .student_course import StudentCourse, CourseStatus
 from .template import Template, TemplateType
-from .operation_log import OperationLog
+from .operation_log import OperationLog, OperationType, TargetTable
 from .document_job import DocumentJob, DocumentJobStatus
 
 __all__ = [
@@ -12,5 +12,7 @@ __all__ = [
     'Student', 'Month', 'StudentCourse', 'CourseStatus',
     'Template',
     'OperationLog',
+    'OperationType',
+    'TargetTable',
     'DocumentJob', 'DocumentJobStatus'
 ]

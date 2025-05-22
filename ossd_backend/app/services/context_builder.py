@@ -50,17 +50,35 @@ DEFAULT_TEACHERS = {
 
 
 # ──────────────── 基础学生字段 ────────────────
+def get_enum_value(val):
+    return val.value if hasattr(val, 'value') else val
+
+MONTH_MAP = {
+    'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+    'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12
+}
+def month_str_to_num(val):
+    if hasattr(val, 'value'):
+        v = val.value
+    else:
+        v = val
+    if isinstance(v, int):
+        return v
+    if isinstance(v, str) and v.isdigit():
+        return int(v)
+    return MONTH_MAP.get(v.upper(), 0)
+
 def build_student_context(stu: Student) -> Dict[str, Any]:
     return {
         # 基本信息
         "STUDENT_FIRSTNAME": stu.first_name,
         "STUDENT_LASTNAME": stu.last_name,
         "STUDENT_FULLNAME": f"{stu.last_name}, {stu.first_name}",
-        "OEN": f"{stu.oen[:3]}-{stu.oen[3:6]}-{stu.oen[6:]}",
-        "DOB": f"{stu.birth_year}-{stu.birth_month.value}-{stu.birth_day:02d}",
-        "ENROLL_DATE": f"{stu.enrollment_year}-{stu.enrollment_month.value}-{stu.enrollment_day:02d}",
-        "EXPECTED_GRAD": f"{stu.expected_graduation_year}-{stu.expected_graduation_month.value}-{stu.expected_graduation_day:02d}",
-        "GRADE": stu.grade.value if hasattr(stu, "grade") else "",
+        "OEN": f"{stu.OEN[:3]}-{stu.OEN[3:6]}-{stu.OEN[6:]}",
+        "DOB": f"{stu.birth_year}-{get_enum_value(stu.birth_month)}-{int(stu.birth_day):02d}",
+        "ENROLL_DATE": f"{stu.enrollment_year}-{get_enum_value(stu.enrollment_month)}-{int(stu.enrollment_day):02d}",
+        "EXPECTED_GRAD": f"{stu.expected_graduation_year}-{get_enum_value(stu.expected_graduation_month)}-{int(stu.expected_graduation_day):02d}",
+        "GRADE": get_enum_value(stu.grade) if hasattr(stu, "grade") else "",
         # 生成日期
         "TODAY": datetime.now().strftime("%Y-%b-%d"),
     }
@@ -102,10 +120,11 @@ def build_course_table_context(courses: List[Course]) -> Dict[str, Any]:
 def build_course_desc_context(courses: List[Course]) -> Dict[str, Any]:
     """供 WelcomeLetter 课程描述 for-循环使用"""
     return {
-        "SELECTED_COURSES": [
+        "COURSE_LIST": [
             {
-                "COURSE_CODE": c.course_code,
-                "COURSE_DESCRIPTION": c.description,
+                "COURSE_NAME": getattr(c, "course_name", ""),
+                "COURSE_CODE": getattr(c, "course_code", ""),
+                "COURSE_DESCRIPTION": getattr(c, "description", ""),
             }
             for c in courses
         ]
@@ -181,12 +200,14 @@ def get_semester_from_date(date: datetime = None) -> str:
 def build_report_card_context(
     student: Student,
     student_courses: List[StudentCourse],
-    extra_data: Dict[str, Any]
+    extra_data: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     构建用于 Report Card 的渲染上下文，结合数据库与手动填写数据。
     如果课程有期末成绩，则使用期末成绩单；否则使用期中成绩单。
     """
+    if extra_data is None:
+        extra_data = {}
     base = build_student_context(student)
 
     # 自动判断学期（如果手动指定了则使用手动指定的值）
@@ -198,8 +219,8 @@ def build_report_card_context(
     base.update({
         "semester": semester,
         "name": f"{student.last_name}, {student.first_name}",
-        "OEN": student.oen,
-        "Grade": student.grade.value if hasattr(student, "grade") else "",
+        "OEN": student.OEN,
+        "Grade": get_enum_value(student.grade) if hasattr(student, "grade") else "",
         "homeroom": extra_data.get("homeroom", "N/A"),
         "principal": "Eric Tran",
         "schoolName": "Emerald Valley Academy",
@@ -213,11 +234,11 @@ def build_report_card_context(
 
     rows = []
     # 获取每个课程的 reporting 状态（如果手动指定了则使用手动指定的值）
-    course_reporting = extra_data.get("course_reporting", {})
+    course_reporting = extra_data.get("course_reporting") or {}
 
     for sc in student_courses:
         course = sc.course
-        cid = str(sc.id)
+        cid = str(getattr(sc, 'id', 0))
         
         # 如果手动指定了该课程的 reporting 状态，则使用手动指定的值
         # 否则根据是否有期末成绩自动判断
@@ -270,6 +291,12 @@ def build_report_card_context(
             "finalTimesLate": extra_data.get(f"{cid}_finalTimesLate", 0),
             # 评语（优先使用手动填写）
             "comment": extra_data.get(f"{cid}_comment", comment),
+            # 课程级别兼容
+            "level": (
+                getattr(course.course_level, 'name', course.course_level)[-1]
+                if getattr(course.course_level, 'name', course.course_level).startswith("ESL")
+                else getattr(course.course_level, 'name', course.course_level)[-2:]
+            ),
         })
 
     base["RC_COURSES"] = rows
@@ -304,9 +331,9 @@ extra_data = {
     "13_finalClassMissed": 3, "13_finalTotalClass": 35, "13_finalTimesLate": 1,
 }
 """
-def build_transcript_context(student: Student, student_courses: List[StudentCourse], is_final: bool = False, extra_data: dict = {}) -> dict[str, str]:
-    from datetime import datetime
-
+def build_transcript_context(student: Student, student_courses: List[StudentCourse], is_final: bool = False, extra_data: dict = None) -> dict[str, str]:
+    if extra_data is None:
+        extra_data = {}
     ctx: dict[str, str] = {}
 
     # 日期 & 页码支持手动覆写
@@ -317,18 +344,18 @@ def build_transcript_context(student: Student, student_courses: List[StudentCour
     # 学生基础信息
     ctx["lastName"] = student.last_name
     ctx["firstName"] = student.first_name
-    ctx["OEN"] = student.oen
+    ctx["OEN"] = student.OEN
     ctx["dobYear"] = str(student.birth_year)
-    ctx["dobMonth"] = student.birth_month.value
-    ctx["dobDay"] = str(student.birth_day)
+    ctx["dobMonth"] = month_str_to_num(student.birth_month)
+    ctx["dobDay"] = str(int(student.birth_day))
     ctx["enrollYear"] = str(student.enrollment_year)
-    ctx["enrollMonth"] = student.enrollment_month.value
-    ctx["enrollDay"] = str(student.enrollment_day)
+    ctx["enrollMonth"] = month_str_to_num(student.enrollment_month)
+    ctx["enrollDay"] = str(int(student.enrollment_day))
 
     # 自动 studentNo = YYMM + last2(student_id) + DOB
-    suffix = f"{student.id:02d}"[-2:]
-    dob_str = f"{student.birth_year % 100:02d}{student.birth_month.value:02d}{student.birth_day:02d}"
-    ctx["studentNo"] = f"{student.enrollment_year % 100:02d}{student.enrollment_month.value:02d}{suffix}{dob_str}"
+    suffix = f"{getattr(student, 'id', 0):02d}"[-2:]
+    dob_str = f"{student.birth_year % 100:02d}{month_str_to_num(student.birth_month):02d}{int(student.birth_day):02d}"
+    ctx["studentNo"] = f"{student.enrollment_year % 100:02d}{month_str_to_num(student.enrollment_month):02d}{suffix}{dob_str}"
 
     # 学校字段
     ctx["schoolBoard"] = "Private"
@@ -367,8 +394,9 @@ def build_transcript_context(student: Student, student_courses: List[StudentCour
             "code": c.course_code,
             "course": c.course_name,
             "level": (
-                c.course_level.name[-1] if c.course_level.name.startswith("ESL")
-                else c.course_level.name[-2:]
+                getattr(c.course_level, 'name', c.course_level)[-1]
+                if getattr(c.course_level, 'name', c.course_level).startswith("ESL")
+                else getattr(c.course_level, 'name', c.course_level)[-2:]
             ),
             "grade": str(sc.final_grade) if sc.final_grade is not None else "",
             "cr": f"{c.credit:.1f}",

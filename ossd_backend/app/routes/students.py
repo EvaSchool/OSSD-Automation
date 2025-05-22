@@ -68,18 +68,19 @@ def create_student():
             first_name=data['first_name'],
             OEN=data['OEN'],
             birth_year=data['birth_year'],
-            birth_month=parse_enum(data['birth_month'], Month),
+            birth_month=parse_enum(Month, data['birth_month']),
             birth_day=data['birth_day'],
             enrollment_year=data['enrollment_year'],
-            enrollment_month=parse_enum(data['enrollment_month'], Month),
+            enrollment_month=parse_enum(Month, data['enrollment_month']),
             enrollment_day=data['enrollment_day'],
             expected_graduation_year=data['expected_graduation_year'],
-            expected_graduation_month=parse_enum(data.get('expected_graduation_month', 'JUN'), Month),
+            expected_graduation_month=parse_enum(Month, data.get('expected_graduation_month', 'JUN')),
             expected_graduation_day=data.get('expected_graduation_day', 30),
             address=data.get('address'),
-            graduation_status=parse_enum(data.get('graduation_status', 'IN_PROGRESS'), GraduationStatus),
+            graduation_status=parse_enum(GraduationStatus, data.get('graduation_status', 'IN_PROGRESS')),
             volunteer_hours=data.get('volunteer_hours', 0),
-            grade=data.get('grade', '9')
+            grade=data.get('grade', '9'),
+            remark=data.get('remark')
         )
 
         db.session.add(student)
@@ -102,14 +103,14 @@ def update_student(id):
         'last_name', 'first_name', 'OEN', 'birth_year', 'birth_month', 'birth_day',
         'enrollment_year', 'enrollment_month', 'enrollment_day',
         'expected_graduation_year', 'expected_graduation_month', 'expected_graduation_day',
-        'address', 'graduation_status', 'volunteer_hours', 'grade'
+        'address', 'graduation_status', 'volunteer_hours', 'grade', 'remark'
     ]:
         if field in data:
             value = data[field]
             if field in ['birth_month', 'enrollment_month', 'expected_graduation_month']:
-                setattr(student, field, parse_enum(value, Month))
+                setattr(student, field, parse_enum(Month, value))
             elif field == 'graduation_status':
-                setattr(student, field, parse_enum(value, GraduationStatus))
+                setattr(student, field, parse_enum(GraduationStatus, value))
             else:
                 setattr(student, field, value)
 

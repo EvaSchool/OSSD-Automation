@@ -1,6 +1,7 @@
 from app import db
 from datetime import datetime
 from enum import Enum
+from sqlalchemy import Enum as SAEnum
 
 class Month(Enum):
     JAN = 'JAN'
@@ -47,7 +48,16 @@ class Student(db.Model):
     address = db.Column(db.Text, comment='学生地址（格式：街道, 城市, 省, 国家）')
     graduation_status = db.Column(db.Enum(GraduationStatus), nullable=False, default=GraduationStatus.IN_PROGRESS, comment='毕业状态')
     volunteer_hours = db.Column(db.Integer, nullable=False, default=0, comment='义工时数（≥0）')
-    grade = db.Column(db.Enum(GradeLevel), nullable=False, default=GradeLevel.GRADE_9, comment='学生当前年级')
+    grade = db.Column(
+        SAEnum(
+            GradeLevel,
+            values_callable=lambda x: [e.value for e in x]
+        ),
+        nullable=False,
+        default=GradeLevel.GRADE_9,
+        comment='学生当前年级'
+    )
+    remark = db.Column(db.Text, comment='学生备注信息')
 
     
     # 关联关系
@@ -71,6 +81,6 @@ class Student(db.Model):
             'address': self.address,
             'graduation_status': self.graduation_status.value,
             'volunteer_hours': self.volunteer_hours,
-            'grade': self.grade.value
-
+            'grade': self.grade.value if hasattr(self.grade, 'value') else self.grade,
+            'remark': self.remark
         } 

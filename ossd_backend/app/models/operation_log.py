@@ -1,5 +1,5 @@
 from app import db
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 class OperationType(Enum):
@@ -22,7 +22,7 @@ class OperationLog(db.Model):
     target_table = db.Column(db.Enum(TargetTable), nullable=False, comment='目标表')
     target_id = db.Column(db.String(255), nullable=False, comment='目标记录ID')
     operation_details = db.Column(db.JSON, comment='操作详情（JSON格式）')
-    operation_time = db.Column(db.DateTime, default=datetime.utcnow, comment='操作时间')
+    operation_time = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), comment='操作时间')
     
     # 关联关系
     user = db.relationship('User', back_populates='operation_logs')
