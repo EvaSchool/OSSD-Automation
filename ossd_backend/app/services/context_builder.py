@@ -352,10 +352,8 @@ def build_transcript_context(student: Student, student_courses: List[StudentCour
     ctx["enrollMonth"] = month_str_to_num(student.enrollment_month)
     ctx["enrollDay"] = str(int(student.enrollment_day))
 
-    # 自动 studentNo = YYMM + last2(student_id) + DOB
-    suffix = f"{getattr(student, 'id', 0):02d}"[-2:]
-    dob_str = f"{student.birth_year % 100:02d}{month_str_to_num(student.birth_month):02d}{int(student.birth_day):02d}"
-    ctx["studentNo"] = f"{student.enrollment_year % 100:02d}{month_str_to_num(student.enrollment_month):02d}{suffix}{dob_str}"
+    # 直接使用 student 表中的 student_number 字段
+    ctx["studentNo"] = student.student_number
 
     # 学校字段
     ctx["schoolBoard"] = "Private"

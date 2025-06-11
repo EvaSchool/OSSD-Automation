@@ -33,6 +33,7 @@ class Student(db.Model):
     __tablename__ = 'students'
     
     student_id = db.Column(db.Integer, primary_key=True, autoincrement=True, comment='学生唯一ID')
+    student_number = db.Column(db.String(20), unique=True, nullable=False)
     last_name = db.Column(db.String(50), nullable=False, comment='学生姓氏')
     first_name = db.Column(db.String(50), nullable=False, comment='学生名字')
     OEN = db.Column(db.String(9), unique=True, nullable=False, comment='OEN（9位数字，显示时格式化为XXX-XXX-XXX）')
@@ -66,6 +67,7 @@ class Student(db.Model):
     def to_dict(self):
         return {
             'student_id': self.student_id,
+            'student_number': self.student_number,
             'last_name': self.last_name,
             'first_name': self.first_name,
             'OEN': self.OEN,

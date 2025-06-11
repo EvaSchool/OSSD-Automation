@@ -1,18 +1,19 @@
 from functools import wraps
 from flask import jsonify
-from flask_jwt_extended import get_jwt_identity
-from app.models import User
+from flask_jwt_extended import get_jwt_identity, jwt_required
+from app.models import User, UserRole
 from datetime import datetime
 import re
 
 def admin_required(f):
     """管理员权限验证装饰器"""
     @wraps(f)
+    @jwt_required()
     def decorated_function(*args, **kwargs):
         current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
         
-        if not user or not user.is_admin:
+        if not user or user.role != UserRole.ADMIN:
             return jsonify({
                 'code': 403,
                 'message': '需要管理员权限'
@@ -114,16 +115,6 @@ def validate_phone(phone):
 
 def validate_password_strength(password):
     """验证密码强度"""
-    if len(password) < 8:
-        return False, "密码长度至少为8个字符"
-    if not any(c.isupper() for c in password):
-        return False, "密码必须包含至少一个大写字母"
-    if not any(c.islower() for c in password):
-        return False, "密码必须包含至少一个小写字母"
-    if not any(c.isdigit() for c in password):
-        return False, "密码必须包含至少一个数字"
-    if not any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password):
-        return False, "密码必须包含至少一个特殊字符"
     return True, "密码强度符合要求"
 
 def format_datetime(dt):
@@ -150,4 +141,40 @@ def parse_datetime(datetime_str):
     try:
         return datetime.strptime(datetime_str, '%Y-%m-%d %H:%M:%S')
     except (ValueError, TypeError):
+        return None
+
+def month_str_to_num(val):
+    """
+    将月份字符串转换为数字（两位数）
+    支持：'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'
+    或数字字符串 '1', '2', ..., '12'
+    或数字 1, 2, ..., 12
+    返回：'01', '02', ..., '12'
+    """
+    if hasattr(val, 'value'):
+        v = val.value
+    else:
+        v = val
+
+    if isinstance(v, int):
+        return f"{v:02d}"
+    if isinstance(v, str) and v.isdigit():
+        return f"{int(v):02d}"
+
+    MONTH_MAP = {
+        'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+        'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12
+    }
+    month_num = MONTH_MAP.get(v.upper(), 0)
+    return f"{month_num:02d}"
+
+def parse_enum(enum_class, value):
+    """
+    将字符串或数字转换为枚举值
+    """
+    if isinstance(value, enum_class):
+        return value
+    try:
+        return enum_class(value)
+    except ValueError:
         return None

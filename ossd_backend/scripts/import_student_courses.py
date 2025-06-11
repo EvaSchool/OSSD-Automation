@@ -27,13 +27,26 @@ def load_students_by_oen():
     """构建 OEN → student_id 映射"""
     return {s.OEN.replace("-", ""): s for s in Student.query.all()}
 
+def check_missing_courses(df):
+    """检查并返回不存在的课程代码列表"""
+    existing_courses = {c.course_code for c in Course.query.all()}
+    course_codes = {str(row["课程代码"]).strip().upper() for _, row in df.iterrows()}
+    return course_codes - existing_courses
+
 def run_import():
     df = pd.read_excel(EXCEL_FILE)
     df.columns = [str(c).strip() for c in df.columns]
 
-    success, skipped, errors = [], [], []
-
     with app.app_context():
+        # 首先检查所有不存在的课程
+        missing_courses = check_missing_courses(df)
+        if missing_courses:
+            print("\n❌ 以下课程在系统中不存在，请先添加这些课程：")
+            for code in sorted(missing_courses):
+                print(f"  - {code}")
+            return
+
+        success, skipped, errors = [], [], []
         oen_map = load_students_by_oen()
 
         for idx, row in df.iterrows():
@@ -98,18 +111,20 @@ def run_import():
 
         db.session.commit()
 
-    print("\n✅ 成功添加:")
-    for fn, ln, code in success:
-        print(f"  - {ln} {fn} - {code}")
+        print("\n✅ 成功添加:")
+        for fn, ln, code in success:
+            print(f"  - {ln} {fn} - {code}")
 
-    print("\n⏭️ 跳过已有:")
-    for fn, ln, code in skipped:
-        print(f"  - {ln} {fn} - {code}")
+        print("\n⏭️ 跳过已有:")
+        for fn, ln, code in skipped:
+            print(f"  - {ln} {fn} - {code}")
 
-    print("\n❌ 错误记录:")
-    for rownum, msg, name, code in errors:
-        print(f"  - 第 {rownum} 行: {name} - {code}：{msg}")
+        print("\n❌ 错误记录:")
+        for rownum, msg, name, code in errors:
+            print(f"  - 第 {rownum} 行: {name} - {code}：{msg}")
 
 
 if __name__ == "__main__":
     run_import()
+
+"""test"""

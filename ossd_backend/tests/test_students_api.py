@@ -1,8 +1,9 @@
 import requests
+import os
 
 BASE_URL = "http://127.0.0.1:8080"
 LOGIN_ENDPOINT = "/api/v1/users/login"
-STUDENTS_ENDPOINT = "/api/v1/students"
+IMPORT_ENDPOINT = "/api/v1/students/import"
 
 # === Step 1: Login and get access token ===
 login_data = {
@@ -19,6 +20,20 @@ access_token = login_response.json().get("access_token")
 headers = {"Authorization": f"Bearer {access_token}"}
 print("✅ Login successful.")
 
+# === Step 2: 批量导入studentdata.csv ===
+file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "studentdata.csv")
+
+with open(file_path, "rb") as f:
+    files = {"file": ("studentdata.csv", f, "text/csv")}
+    response = requests.post(BASE_URL + IMPORT_ENDPOINT, files=files, headers=headers)
+
+print("状态码:", response.status_code)
+try:
+    print("返回内容:", response.json())
+except Exception:
+    print("返回内容(非json):", response.text)
+
+'''
 # === Step 2: Create a test student ===
 test_OEN = "123456789"
 new_student = {
@@ -124,3 +139,4 @@ if response.status_code == 400 and "FINISHED" in response.text:
     print("✅ Invalid graduation status correctly rejected.")
 else:
     print("❌ Invalid graduation status test failed:", response.text)
+'''

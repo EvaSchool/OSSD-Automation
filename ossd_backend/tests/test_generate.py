@@ -49,12 +49,12 @@ print(f"随机选择的三门课程: {[c['course_code'] for c in selected_course
 
 # 4. 需要生成的模板类型（去掉 PredictedGrades）
 template_types = [
-    #"ReportCard",
-    #"Transcript",
-    #"LetterOfEnrolment",
-    #"LetterOfAcceptance",
-    # "WelcomeLetter", # 可用
-    #"FinalTranscript"
+    "ReportCard",
+    "Transcript",
+    "LetterOfEnrolment",
+    "LetterOfAcceptance",
+    "WelcomeLetter", # 可用
+    "FinalTranscript"
 ]
 
 # 5. 依次生成每个文件

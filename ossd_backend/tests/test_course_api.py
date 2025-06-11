@@ -1,4 +1,5 @@
 import requests
+import os
 
 BASE_URL = "http://127.0.0.1:8080"
 LOGIN_ENDPOINT = "/api/v1/users/login"
@@ -29,8 +30,11 @@ headers = {"Authorization": f"Bearer {access_token}"}
 print("✅ Login successful.")
 
 # === Step 2: Create a course ===
-test_course_code = "PLE"
+test_course_code = "TEST101"
 
+# 先尝试删除可能存在的测试课程
+delete_test_data = {"course_codes": [test_course_code]}
+requests.delete(BASE_URL + COURSES_ENDPOINT, json=delete_test_data, headers=headers)
 
 new_course = {
     "course_code": test_course_code,
@@ -59,7 +63,7 @@ found = any(c['course_code'] == test_course_code for c in courses)
 print("✅ Course found by course_code." if found else "❌ Course not found by course_code.")
 
 # === Step 3b: Keyword fuzzy search ===
-params = {"keyword": "4u"}
+params = {"keyword": "ENG"}
 fuzzy_response = requests.get(BASE_URL + COURSES_ENDPOINT, headers=headers, params=params)
 debug_response("Fuzzy Search", fuzzy_response)
 fuzzy_courses = fuzzy_response.json().get("data", {}).get("list", [])
@@ -90,7 +94,40 @@ if courses:
 
 
 # === Step 5: Delete course ===
-delete_data = {"course_codes": ["PLE"]}
+delete_data = {"course_codes": [test_course_code]}
 delete_response = requests.delete(BASE_URL + COURSES_ENDPOINT, json=delete_data, headers=headers)
 debug_response("Delete Course", delete_response)
 print("✅ Course deleted successfully." if delete_response.status_code == 200 else "❌ Failed to delete course.")
+
+# 获取当前文件所在目录的父目录（项目根目录）
+project_root = os.path.dirname(os.path.dirname(__file__))
+# 尝试不同的文件扩展名
+for ext in ['.xlsx', '.csv']:
+    import_file_path = os.path.join(project_root, f"coursedata{ext}")
+    if os.path.exists(import_file_path):
+        print(f"📁 找到导入文件: {import_file_path}")
+        break
+else:
+    print("❌ 未找到导入文件")
+    exit(1)
+
+# 以 multipart/form-data 方式上传
+with open(import_file_path, "rb") as f:
+    files = {
+        "file": (os.path.basename(import_file_path), f)
+    }
+
+    import_response = requests.post(BASE_URL + "/api/v1/courses/import", files=files, headers=headers)
+
+def debug_import_response(label, response):
+    print(f"🔹 {label} | Status: {response.status_code}")
+    try:
+        res_json = response.json()
+        print(f"  Created: {res_json.get('data', {}).get('created', [])}")
+        print(f"  Updated: {res_json.get('data', {}).get('updated', [])}")
+        print(f"  Errors: {res_json.get('data', {}).get('errors', [])}")
+    except:
+        print(f"🔹 {label} | Raw Text:", response.text)
+
+# 调用打印结果
+debug_import_response("Import Courses", import_response)

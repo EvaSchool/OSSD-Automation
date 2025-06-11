@@ -1,13 +1,14 @@
 import requests
+import os
 
 BASE_URL = "http://127.0.0.1:8080"
+IMPORT_ENDPOINT = "/api/v1/students/import"
 LOGIN_ENDPOINT = "/api/v1/users/login"
-STUDENTS_ENDPOINT = "/api/v1/students"
 
 # 登录获取token
 login_data = {
-    "username": "alice",
-    "password": "123456"
+    "username": "alice",  # 请替换为你的管理员用户名
+    "password": "123456"  # 请替换为你的管理员密码
 }
 
 login_response = requests.post(BASE_URL + LOGIN_ENDPOINT, json=login_data)
@@ -19,159 +20,15 @@ access_token = login_response.json().get("access_token")
 headers = {"Authorization": f"Bearer {access_token}"}
 print("✅ 登录成功.")
 
-# 学生数据
-students_data = [
-    {
-        "last_name": "Wang",
-        "first_name": "Kechen",
-        "OEN": "816145163",
-        "birth_year": 2006,
-        "birth_month": "DEC",
-        "birth_day": 21,
-        "enrollment_year": 2025,
-        "enrollment_month": "FEB",
-        "enrollment_day": 24,
-        "expected_graduation_year": 2025,
-        "expected_graduation_month": "JUN",
-        "expected_graduation_day": 30,
-        "address": "China Railway Yidu International Unit E, GuiYang, GuiZhou, China",
-        "graduation_status": "IN_PROGRESS",
-        "volunteer_hours": 0
-    },
-    {
-        "last_name": "Qi",
-        "first_name": "Ziwen",
-        "OEN": "757679436",
-        "birth_year": 2007,
-        "birth_month": "JUN",
-        "birth_day": 8,
-        "enrollment_year": 2024,
-        "enrollment_month": "SEP",
-        "enrollment_day": 3,
-        "expected_graduation_year": 2025,
-        "expected_graduation_month": "JUN",
-        "expected_graduation_day": 30,
-        "address": "170 Sheppard Ave E, North York, Canada",
-        "graduation_status": "IN_PROGRESS",
-        "volunteer_hours": 0
-    },
-    {
-        "last_name": "Wang",
-        "first_name": "Luowen",
-        "OEN": "414991547",
-        "birth_year": 2007,
-        "birth_month": "JAN",
-        "birth_day": 11,
-        "enrollment_year": 2024,
-        "enrollment_month": "SEP",
-        "enrollment_day": 3,
-        "expected_graduation_year": 2025,
-        "expected_graduation_month": "JUN",
-        "expected_graduation_day": 30,
-        "address": "170 Sheppard Ave E, North York, Canada",
-        "graduation_status": "IN_PROGRESS",
-        "volunteer_hours": 0
-    },
-    {
-        "last_name": "Lin",
-        "first_name": "Keqin",
-        "OEN": "199561135",
-        "birth_year": 2007,
-        "birth_month": "JUN",
-        "birth_day": 7,
-        "enrollment_year": 2024,
-        "enrollment_month": "SEP",
-        "enrollment_day": 3,
-        "expected_graduation_year": 2025,
-        "expected_graduation_month": "JUN",
-        "expected_graduation_day": 30,
-        "address": "170 Sheppard Ave E, North York, Canada",
-        "graduation_status": "IN_PROGRESS",
-        "volunteer_hours": 0
-    },
-    {
-        "last_name": "Tang",
-        "first_name": "Yonglin",
-        "OEN": "875598575",
-        "birth_year": 2005,
-        "birth_month": "AUG",
-        "birth_day": 19,
-        "enrollment_year": 2024,
-        "enrollment_month": "SEP",
-        "enrollment_day": 3,
-        "expected_graduation_year": 2025,
-        "expected_graduation_month": "JUN",
-        "expected_graduation_day": 30,
-        "address": "170 Sheppard Ave E, North York, Canada",
-        "graduation_status": "IN_PROGRESS",
-        "volunteer_hours": 0
-    },
-    {
-        "last_name": "Duan Shufan",
-        "first_name": "Shufan",
-        "OEN": "491840401",
-        "birth_year": 2007,
-        "birth_month": "JUN",
-        "birth_day": 2,
-        "enrollment_year": 2024,
-        "enrollment_month": "SEP",
-        "enrollment_day": 3,
-        "expected_graduation_year": 2025,
-        "expected_graduation_month": "JUN",
-        "expected_graduation_day": 30,
-        "address": "170 Sheppard Ave E, North York, Canada",
-        "graduation_status": "IN_PROGRESS",
-        "volunteer_hours": 0
-    },
-    {
-        "last_name": "Lee",
-        "first_name": "Teresa",
-        "OEN": "267987964",
-        "birth_year": 2005,
-        "birth_month": "DEC",
-        "birth_day": 5,
-        "enrollment_year": 2024,
-        "enrollment_month": "SEP",
-        "enrollment_day": 3,
-        "expected_graduation_year": 2025,
-        "expected_graduation_month": "JUN",
-        "expected_graduation_day": 30,
-        "address": "170 Sheppard Ave E, North York, Canada",
-        "graduation_status": "IN_PROGRESS",
-        "volunteer_hours": 0
-    },
-    {
-        "last_name": "Kong",
-        "first_name": "Zemu",
-        "OEN": "497852137",
-        "birth_year": 2006,
-        "birth_month": "FEB",
-        "birth_day": 5,
-        "enrollment_year": 2025,
-        "enrollment_month": "MAR",
-        "enrollment_day": 26,
-        "expected_graduation_year": 2027,
-        "expected_graduation_month": "JUN",
-        "expected_graduation_day": 30,
-        "address": "170 Sheppard Ave E, North York, Canada",
-        "graduation_status": "IN_PROGRESS",
-        "volunteer_hours": 0
-    }
-]
+# 定位studentdata.csv文件（假设在ossd_backend目录下）
+file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "studentdata.csv")
 
-# 添加学生
-for student in students_data:
-    # 先检查OEN是否已存在
-    check_response = requests.get(f"{BASE_URL}{STUDENTS_ENDPOINT}?keyword={student['OEN']}", headers=headers)
-    if check_response.status_code == 200:
-        existing_students = check_response.json().get('data', {}).get('list', [])
-        if any(s['OEN'] == student['OEN'] for s in existing_students):
-            print(f"⚠️ 学生 {student['first_name']} {student['last_name']} (OEN: {student['OEN']}) 已存在，跳过.")
-            continue
+with open(file_path, "rb") as f:
+    files = {"file": ("studentdata.csv", f, "text/csv")}
+    response = requests.post(BASE_URL + IMPORT_ENDPOINT, files=files, headers=headers)
 
-    # 如果不存在，则添加
-    response = requests.post(BASE_URL + STUDENTS_ENDPOINT, json=student, headers=headers)
-    if response.status_code == 201:
-        print(f"✅ 学生 {student['first_name']} {student['last_name']} 添加成功.")
-    else:
-        print(f"❌ 学生 {student['first_name']} {student['last_name']} 添加失败: {response.text}")
+print("状态码:", response.status_code)
+try:
+    print("返回内容:", response.json())
+except Exception:
+    print("返回内容(非json):", response.text)

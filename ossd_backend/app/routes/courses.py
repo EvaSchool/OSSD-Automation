@@ -6,6 +6,7 @@ print("✅ app.utils.parse_enum 已导入")
 from sqlalchemy import or_
 import csv
 from io import StringIO
+import pandas as pd
 
 
 bp = Blueprint('courses', __name__)
@@ -161,45 +162,127 @@ def delete_courses():
 @admin_required
 def import_courses():
     try:
+        print("🔍 开始导入课程...")
         if 'file' not in request.files:
+            print("❌ 没有找到上传的文件")
             return jsonify({'code': 400, 'message': 'Please upload a file'}), 400
 
         file = request.files['file']
-        if not file.filename.endswith('.csv'):
-            return jsonify({'code': 400, 'message': 'Please upload a CSV file'}), 400
+        filename = file.filename.lower()
+        print(f"📁 文件名: {filename}")
 
-        content = file.read().decode('utf-8')
-        csv_file = StringIO(content)
-        reader = csv.DictReader(csv_file)
+        if filename.endswith('.csv'):
+            print("📝 处理CSV文件...")
+            content = file.read().decode('utf-8')
+            csv_file = StringIO(content)
+            df = pd.read_csv(csv_file)
+        elif filename.endswith('.xlsx'):
+            print("📝 处理Excel文件...")
+            df = pd.read_excel(file)
+        else:
+            print(f"❌ 不支持的文件类型: {filename}")
+            return jsonify({'code': 400, 'message': 'Please upload a CSV or Excel (.xlsx) file'}), 400
 
-        success_count = 0
-        failed_rows = []
+        print(f"📊 读取到的列: {df.columns.tolist()}")
+        df.columns = [str(c).strip() for c in df.columns]
+        print(f"📊 处理后的列: {df.columns.tolist()}")
+        print(f"📊 数据行数: {len(df)}")
 
-        for row_num, row in enumerate(reader, start=2):
+        created, updated, errors = [], [], []
+
+        for idx, row in df.iterrows():
             try:
-                course = Course(
-                    course_code=row['course_code'],
-                    course_name=row['course_name'],
-                    description=row['description'],
-                    credit=float(row['credit']) if row.get('credit') else None,
-                    course_level=parse_enum(CourseLevel, row['course_level']),
-                    is_compulsory=row.get('is_compulsory', 'false').lower() == 'true'
-                )
-                db.session.add(course)
-                success_count += 1
-            except Exception as e:
-                failed_rows.append({'row': row_num, 'errors': [str(e)]})
+                print(f"\n🔍 处理第 {idx + 1} 行数据... 原始数据: {row}")
+                course_code = str(row['course_code']).strip().upper()
+                course_name = str(row['course_name']).strip()
+                description = str(row['description']).strip() if pd.notna(row['description']) else ""
+                credit = float(row['credit']) if pd.notna(row['credit']) else 0.0
+                
+                print(f"📝 课程代码: {course_code}")
+                print(f"📝 课程名称: {course_name}")
+                print(f"📝 学分: {credit}")
+                
+                # 处理course_level
+                course_level = None
+                course_level_raw = row['course_level']
+                if pd.isna(course_level_raw):
+                    course_level_str = ''
+                else:
+                    try:
+                        course_level_str = str(int(float(course_level_raw)))
+                    except Exception:
+                        course_level_str = str(course_level_raw).strip()
+                print(f"📝 原始课程级别: {course_level_raw}，标准化后: {course_level_str}")
+                level_map = {
+                    '1': 'ESL1', '2': 'ESL2', '3': 'ESL3', '4': 'ESL4', '5': 'ESL5',
+                    '9': '09', '10': '10', '11': '11', '12': '12'
+                }
+                mapped_level = level_map.get(course_level_str)
+                if mapped_level:
+                    try:
+                        course_level = parse_enum(CourseLevel, mapped_level)
+                        print(f"✅ 解析课程级别: {course_level}")
+                    except Exception as e:
+                        print(f"❌ 解析课程级别失败: {e}")
+                        errors.append({'row': idx + 2, 'course_code': course_code, 'error': f'course_level无效: {course_level_raw}'})
+                        continue
+                else:
+                    print(f"❌ 未知course_level: {course_level_raw}")
+                    errors.append({'row': idx + 2, 'course_code': course_code, 'error': f'course_level无效: {course_level_raw}'})
+                    continue
+                # 处理is_compulsory
+                is_compulsory = False
+                if pd.notna(row.get('is_compulsory')):
+                    is_compulsory = str(row['is_compulsory']).lower() == 'true'
+                print(f"📝 是否必修: {is_compulsory}")
 
+                existing = Course.query.filter_by(course_code=course_code).first()
+                if existing:
+                    print(f"📝 更新已存在的课程: {course_code}")
+                    # 更新
+                    existing.course_name = course_name
+                    existing.description = description
+                    existing.credit = credit
+                    existing.course_level = course_level.value
+                    existing.is_compulsory = is_compulsory
+                    updated.append(course_code)
+                else:
+                    print(f"📝 创建新课程: {course_code}")
+                    # 新增
+                    course = Course(
+                        course_code=course_code,
+                        course_name=course_name,
+                        description=description,
+                        credit=credit,
+                        course_level=course_level.value,
+                        is_compulsory=is_compulsory
+                    )
+                    db.session.add(course)
+                    created.append(course_code)
+
+            except Exception as e:
+                print(f"❌ 处理第 {idx + 1} 行时出错: {str(e)}")
+                db.session.rollback()
+                errors.append({'row': idx + 2, 'course_code': row.get('course_code', ''), 'error': str(e)})
+
+        # 在所有数据处理完成后提交事务
         db.session.commit()
+
+        print(f"\n📊 导入结果统计:")
+        print(f"✅ 创建: {len(created)} 个课程")
+        print(f"📝 更新: {len(updated)} 个课程")
+        print(f"❌ 错误: {len(errors)} 个")
 
         return jsonify({
             'code': 201,
             'data': {
-                'success_count': success_count,
-                'failed_rows': failed_rows
+                'created': created,
+                'updated': updated,
+                'errors': errors
             }
         }), 201
 
     except Exception as e:
+        print(f"❌ 导入过程中发生错误: {str(e)}")
         db.session.rollback()
         return jsonify({'code': 500, 'message': f'Failed to import courses: {str(e)}'}), 500
